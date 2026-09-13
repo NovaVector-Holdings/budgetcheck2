@@ -96,6 +96,16 @@ function OverviewPage() {
         </p>
       )}
 
+      {/* Cash on hand feeds the two cards below it, so it comes first. */}
+      <div className="mt-8">
+        <CashOnHandEditor profile={data?.profile ?? null} userId={user.id} />
+      </div>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <PaycheckPlanCard plan={plan} loading={!data} />
+        <NextMoneyMoveCard plan={plan} loading={!data} />
+      </div>
+
       {/* The one number people said matters most, with a plain explanation of what it is. */}
       <section className="paper-card mt-8 p-6 sm:p-8">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
