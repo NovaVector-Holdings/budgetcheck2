@@ -1,11 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { DebtFreeDate } from "@/components/debt-free-date";
 import { CashOnHandEditor, NextMoneyMoveCard, PaycheckPlanCard } from "@/components/paycheck-cards";
-import { BudgetMethodView } from "@/components/budget-method-view";
 import { buildPaycheckPlan } from "@/lib/paycheck";
-import type { BudgetMethod } from "@/lib/budget-methods";
+import { buildPayoffPlan, humanMonths } from "@/lib/payoff";
 import { fmt, today, type Debt, type PlannedExpense, type Profile, type SavingsDeposit, type SavingsGoal } from "@/lib/money";
 
 export const Route = createFileRoute("/_authenticated/overview")({
@@ -45,22 +43,14 @@ function OverviewPage() {
     },
   });
 
-  const now = new Date();
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
   const todayStr = today();
-
-  const in30 = new Date();
-  in30.setDate(in30.getDate() + 30);
-  const upcoming = (data?.expenses ?? []).filter((e) => e.due_date <= in30.toISOString().slice(0, 10));
-  const restOfMonth = (data?.expenses ?? []).filter((e) => e.due_date >= todayStr && e.due_date <= monthEnd);
-  const restOfMonthTotal = restOfMonth.reduce((s, e) => s + Number(e.amount), 0);
   const totalSaved = (data?.deposits ?? []).reduce((s, d) => s + Number(d.amount), 0);
   const totalDebt = (data?.debts ?? []).reduce((s, d) => s + Number(d.balance), 0);
+  const hasDebt = (data?.debts ?? []).length > 0;
 
   const income = data?.profile?.monthly_income ?? null;
-  const estimate = income != null ? income - restOfMonthTotal : null;
 
-  // How complete is the picture? Confidence in the estimate depends on it.
+  // How complete is the picture? Used for the single next-step prompt.
   const checks = [
     { label: "Monthly income added", done: income != null, to: "/settings" as const },
     { label: "Bills & expenses added", done: (data?.expenses ?? []).length > 0, to: "/future-expenses" as const },
@@ -70,7 +60,6 @@ function OverviewPage() {
   const doneChecks = checks.filter((c) => c.done).length;
   const nextStep = checks.find((c) => !c.done);
 
-  // Paycheck-cycle plan. Refuses to produce a number when an input is missing.
   const plan = buildPaycheckPlan({
     profile: data?.profile ?? null,
     expenses: data?.expenses ?? [],
@@ -78,11 +67,7 @@ function OverviewPage() {
     todayIso: todayStr,
   });
 
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-  const monthExpenses = (data?.expenses ?? []).filter((e) => e.due_date >= monthStart && e.due_date <= monthEnd);
-  const monthDeposits = (data?.deposits ?? []).filter((d) => d.deposited_on >= monthStart && d.deposited_on <= monthEnd);
-  const budgetMethod = (data?.profile?.budget_method ?? "fifty_thirty_twenty") as BudgetMethod;
-
+  const debtPlan = hasDebt ? buildPayoffPlan(data!.debts, "snowball") : null;
 
   return (
     <div>
@@ -96,9 +81,6 @@ function OverviewPage() {
         </p>
       )}
 
-      {/* Cash on hand feeds the two cards below it, so it comes first. Rendered only
-          once the profile has loaded, so the editor doesn't flash open for people
-          who already saved a balance. */}
       {data && (
         <div className="mt-8">
           <CashOnHandEditor profile={data.profile} userId={user.id} />
@@ -110,145 +92,77 @@ function OverviewPage() {
         <NextMoneyMoveCard plan={plan} loading={!data} />
       </div>
 
-      {/* The one number people said matters most, with a plain explanation of what it is. */}
-      <section className="paper-card mt-8 p-6 sm:p-8">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Projected month-end surplus
-        </p>
-        <p className="mt-2 font-serif text-4xl text-ink sm:text-5xl">
-          {estimate != null ? fmt(estimate) : "Add your income"}
-        </p>
-        <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">
-          {income != null ? (
-            <>
-              This is your monthly income of {fmt(income)} minus {fmt(restOfMonthTotal)} of bills and
-              expenses still due before the end of the month.
-            </>
-          ) : (
-            <>Add your monthly income in Settings and we can estimate what's left after your bills.</>
-          )}
-        </p>
-        <p className="mt-2 max-w-xl text-xs leading-relaxed text-muted-foreground">
-          It's an estimate, not a guarantee — it only knows what you've entered, and it doesn't include
-          day-to-day spending. Treat it as a ceiling, not spending money.
-        </p>
-
-        <div className="mt-5 border-t border-border pt-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-medium text-ink">
-              How complete your picture is: {doneChecks} of {checks.length}
-            </p>
-            {nextStep && (
-              <Link to={nextStep.to} className="text-sm font-medium text-primary hover:underline">
-                {nextStep.label} →
-              </Link>
-            )}
-          </div>
-          <div className="mt-2 h-1.5 rounded-full bg-secondary">
-            <div
-              className="h-1.5 rounded-full bg-primary transition-all"
-              style={{ width: `${(doneChecks / checks.length) * 100}%` }}
-            />
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            {doneChecks === checks.length
-              ? "You've added everything we ask for — this estimate is as accurate as it gets."
-              : "The more you add, the more you can trust the number above."}
-          </p>
-        </div>
-      </section>
-
-      {/* Two supporting numbers only — kept separate so savings and debt don't read as one thing. */}
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+      {/* Progress strip: savings, debt, and the debt-free goal in one glanceable row. */}
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Link to="/savings" className="paper-card block p-5 transition-shadow hover:shadow-md">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Saved so far</p>
           <p className="mt-2 font-serif text-2xl text-ink">{fmt(totalSaved)}</p>
           <p className="mt-1 text-xs text-muted-foreground">Across your savings goals</p>
         </Link>
+
         <Link to="/debt" className="paper-card block p-5 transition-shadow hover:shadow-md">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Owed so far</p>
           <p className="mt-2 font-serif text-2xl text-ink">{fmt(totalDebt)}</p>
           <p className="mt-1 text-xs text-muted-foreground">What's left on your debts</p>
         </Link>
-      </div>
 
-      {(data?.debts ?? []).length > 0 && (
-        <div className="mt-4">
-          <DebtFreeDate debts={data?.debts ?? []} method="snowball" compact />
-        </div>
-      )}
-
-      <div className="mt-4">
-        <BudgetMethodView
-          method={budgetMethod}
-          input={{
-            income: data?.profile?.monthly_income ?? null,
-            monthExpenses,
-            debts: data?.debts ?? [],
-            monthDeposits,
-          }}
-        />
-      </div>
-
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <section className="paper-card p-6">
-          <h2 className="font-serif text-lg text-ink">Coming up</h2>
-          <p className="mt-1 text-xs text-muted-foreground">Bills due in the next 30 days</p>
-          {upcoming.length === 0 ? (
-            <p className="mt-3 text-sm text-muted-foreground">
-              Nothing due in the next 30 days.{" "}
-              <Link to="/future-expenses" className="text-primary hover:underline">Plan an expense</Link>
+        <Link
+          to="/debt"
+          className="paper-card group flex flex-col justify-between p-5 transition-shadow hover:shadow-md sm:col-span-2 lg:col-span-1"
+        >
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Debt-free goal</p>
+          {debtPlan?.possible ? (
+            <div className="mt-2">
+              <p className="font-serif text-2xl text-ink">{debtPlan.freeLabel}</p>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary">
+                <div
+                  className="h-full rounded-full bg-primary transition-all"
+                  style={{ width: `${Math.min(100, Math.max(0, ((debtPlan.series[0]?.balance ?? 0) - (debtPlan.series[debtPlan.series.length - 1]?.balance ?? 0)) / (debtPlan.series[0]?.balance || 1)) * 100)}%` }}
+                />
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {humanMonths(debtPlan.months)} away at {fmt(debtPlan.monthlyPayment)}/mo · see the plan →
+              </p>
+            </div>
+          ) : hasDebt ? (
+            <p className="mt-2 text-sm text-muted-foreground">
+              Add minimum payments on the Debt page to see your payoff date.
             </p>
           ) : (
-            <ul className="mt-3 space-y-2">
-              {upcoming.slice(0, 5).map((e) => (
-                <li key={e.id} className="flex items-center justify-between text-sm">
-                  <span className="text-ink">{e.name}</span>
-                  <span className="text-muted-foreground">
-                  {e.due_date} · {fmt(e.amount)}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <p className="mt-2 text-sm text-muted-foreground">
+              No debts tracked. That’s the goal — add one here if anything changes.
+            </p>
           )}
-          {upcoming.length > 5 && (
-            <Link to="/future-expenses" className="mt-3 inline-block text-sm font-medium text-primary hover:underline">
-              See all {upcoming.length}
-            </Link>
-          )}
-        </section>
-        <section className="paper-card p-6">
-          <h2 className="font-serif text-lg text-ink">One move to make next</h2>
-          {nextStep ? (
-            <>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                {nextStep.label} — that's the piece missing from your picture, and it's the fastest way to
-                make the number above worth trusting.
-              </p>
-              <Link to={nextStep.to} className="mt-4 inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">
-                {nextStep.label}
-              </Link>
-            </>
-          ) : (
-            <>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                A ten-minute weekly money meeting is the single habit most tied to feeling in control.
-                Your checklist is ready.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Link to="/money-meeting" className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">
-                  Start a money meeting
-                </Link>
-                <Link to="/learn" className="rounded-md border border-border px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-secondary">
-                  Listen to a lesson
-                </Link>
-              </div>
-            </>
-          )}
-        </section>
+        </Link>
       </div>
+
+      {/* One consolidated next-step prompt, only shown when something is missing. */}
+      {nextStep && (
+        <section className="paper-card mt-4 p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Picture completeness: {doneChecks} of {checks.length}
+              </p>
+              <h2 className="mt-1 font-serif text-lg text-ink">Next step: {nextStep.label.toLowerCase()}</h2>
+            </div>
+            <Link
+              to={nextStep.to}
+              className="inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              {nextStep.label}
+            </Link>
+          </div>
+          <div className="mt-3 h-1.5 rounded-full bg-secondary">
+            <div
+              className="h-1.5 rounded-full bg-primary transition-all"
+              style={{ width: `${(doneChecks / checks.length) * 100}%` }}
+            />
+          </div>
+        </section>
+      )}
+
       <p className="mt-6 text-xs text-muted-foreground">Today is {todayStr}.</p>
     </div>
   );
 }
-
