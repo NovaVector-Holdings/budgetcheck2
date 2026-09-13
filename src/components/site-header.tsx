@@ -20,7 +20,7 @@ export function SiteHeader() {
             i
           </span>
           <span className="font-serif text-lg font-semibold tracking-tight text-ink">
-            BudgetChek<span className="text-gold">·</span>Money
+            BudgetChek
           </span>
         </Link>
         <nav className="hidden gap-1 md:flex">
