@@ -14,7 +14,9 @@
 - [x] No paywall: every part of Money Meeting is free
 
 ## Overview simplification
-- [ ] Audit every Overview card against consumer-finance dashboard principles
+- [x] Audit every Overview card against consumer-finance dashboard principles
 - [ ] Remove, consolidate, or relocate low-value and duplicate information
 - [ ] Clarify current balance versus forward-looking estimates
 - [ ] Validate the revised hierarchy on desktop and mobile
+- [ ] Keep a visible, compact debt-free goal link/graphic on Overview.
+
