@@ -70,6 +70,20 @@ function OverviewPage() {
   const doneChecks = checks.filter((c) => c.done).length;
   const nextStep = checks.find((c) => !c.done);
 
+  // Paycheck-cycle plan. Refuses to produce a number when an input is missing.
+  const plan = buildPaycheckPlan({
+    profile: data?.profile ?? null,
+    expenses: data?.expenses ?? [],
+    debts: data?.debts ?? [],
+    todayIso: todayStr,
+  });
+
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  const monthExpenses = (data?.expenses ?? []).filter((e) => e.due_date >= monthStart && e.due_date <= monthEnd);
+  const monthDeposits = (data?.deposits ?? []).filter((d) => d.deposited_on >= monthStart && d.deposited_on <= monthEnd);
+  const budgetMethod = (data?.profile?.budget_method ?? "fifty_thirty_twenty") as BudgetMethod;
+
+
   return (
     <div>
       <p className="eyebrow">Overview</p>
