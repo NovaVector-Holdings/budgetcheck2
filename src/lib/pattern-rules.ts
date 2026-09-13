@@ -96,6 +96,8 @@ export interface PatternRule {
   /** Which direction of money the rule applies to. */
   appliesTo: "out" | "in" | "any";
   source: "default" | "user";
+  /** User rules can be switched off without deleting them. */
+  active?: boolean;
 }
 
 /**
