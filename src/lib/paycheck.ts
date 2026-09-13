@@ -22,7 +22,7 @@ export const PAY_FREQUENCIES: { value: PayFrequency; label: string }[] = [
 
 export type RiskLevel = "low" | "medium" | "high";
 
-export type RecommendationType = "shortfall_warning" | "holdback" | "safe_to_spend";
+export type RecommendationType = "shortfall_warning" | "holdback" | "no_upcoming_obligations";
 
 export interface Obligation {
   id: string;
@@ -40,7 +40,7 @@ export interface PaycheckPlan {
   buffer: number;
   obligations: Obligation[];
   recommendedHoldback: number;
-  safeToSpend: number;
+  estimatedRemaining: number;
   riskLevel: RiskLevel;
   recommendationType: RecommendationType;
   reason: string;
@@ -80,9 +80,9 @@ export function buildPaycheckPlan(args: {
     buffer: 0,
     obligations: [],
     recommendedHoldback: 0,
-    safeToSpend: 0,
+    estimatedRemaining: 0,
     riskLevel: "low",
-    recommendationType: "safe_to_spend",
+    recommendationType: "no_upcoming_obligations",
     reason: "",
     undatedDebtMinimums: 0,
   };
@@ -143,13 +143,13 @@ export function buildPaycheckPlan(args: {
   );
 
   const recommendedHoldback = round2(obligations.reduce((s, o) => s + o.amount, 0));
-  const safeToSpend = round2(onHand - recommendedHoldback - buffer);
+  const estimatedRemaining = round2(onHand - recommendedHoldback - buffer);
 
   let riskLevel: RiskLevel;
   let recommendationType: RecommendationType;
   let reason: string;
 
-  if (safeToSpend < 0) {
+  if (estimatedRemaining < 0) {
     riskLevel = "high";
     recommendationType = "shortfall_warning";
     reason =
@@ -157,12 +157,12 @@ export function buildPaycheckPlan(args: {
         ? `You have ${obligations.length === 1 ? "one bill" : `${obligations.length} bills`} due before ${formatDay(nextPayDate)} that add up to more than what's on hand after your buffer. Moving a due date, paying part of a bill, or adding cash are the ways to close the gap.`
         : `Your buffer is larger than what's on hand, so this shows a gap even with nothing due before ${formatDay(nextPayDate)}.`;
   } else if (recommendedHoldback > 0) {
-    riskLevel = safeToSpend < Math.max(buffer, onHand * 0.1) ? "medium" : "low";
+    riskLevel = estimatedRemaining < Math.max(buffer, onHand * 0.1) ? "medium" : "low";
     recommendationType = "holdback";
-    reason = `Setting this aside covers every bill you've listed as due before ${formatDay(nextPayDate)}. What's left after that is the part you can spend without touching those bills.`;
+    reason = `Setting this aside covers every bill you've listed as due before ${formatDay(nextPayDate)}. What's left is an estimate based on what you've entered — not a live bank balance, and not a guarantee that it's yours to spend.`;
   } else {
     riskLevel = "low";
-    recommendationType = "safe_to_spend";
+    recommendationType = "no_upcoming_obligations";
     reason = `Nothing you've entered is due between today and ${formatDay(nextPayDate)}. That doesn't mean nothing is coming — it means nothing you've told us about is.`;
   }
 
@@ -174,7 +174,7 @@ export function buildPaycheckPlan(args: {
     buffer,
     obligations,
     recommendedHoldback,
-    safeToSpend,
+    estimatedRemaining,
     riskLevel,
     recommendationType,
     reason,
@@ -183,7 +183,7 @@ export function buildPaycheckPlan(args: {
 }
 
 export const RISK_LABEL: Record<RiskLevel, string> = {
-  low: "Low risk",
-  medium: "Watch closely",
-  high: "High risk",
+  low: "Covered",
+  medium: "Tight",
+  high: "Possible shortfall",
 };

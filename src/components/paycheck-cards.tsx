@@ -63,7 +63,7 @@ function Row({ label, amount, tone }: { label: string; amount: number; tone?: "g
 
 /** "Am I okay until my next paycheck?" */
 export function PaycheckPlanCard({ plan, loading }: { plan: PaycheckPlan; loading?: boolean }) {
-  const shortfall = plan.safeToSpend < 0;
+  const shortfall = plan.estimatedRemaining < 0;
   return (
     <section className="paper-card p-6">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -97,9 +97,19 @@ export function PaycheckPlanCard({ plan, loading }: { plan: PaycheckPlan; loadin
             />
             {plan.buffer > 0 && <Row label="Buffer you keep aside" amount={plan.buffer} />}
             {shortfall ? (
-              <Row label="Short by" amount={plan.safeToSpend} tone="bad" />
+              <Row label="Short by" amount={plan.estimatedRemaining} tone="bad" />
             ) : (
-              <Row label="Safe to spend now" amount={plan.safeToSpend} tone="good" />
+              <div className="border-t border-border pt-2">
+                <div className="flex items-baseline justify-between py-2">
+                  <span className="text-sm font-medium text-ink">Estimated remaining</span>
+                  <span className="font-serif text-lg font-semibold text-ink">
+                    {fmt(Math.abs(plan.estimatedRemaining))}
+                  </span>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Based on what you entered. Not a live bank balance. Your actual available cash may differ.
+                </p>
+              </div>
             )}
           </div>
 
@@ -139,7 +149,7 @@ export function PaycheckPlanCard({ plan, loading }: { plan: PaycheckPlan; loadin
 export function NextMoneyMoveCard({ plan, loading }: { plan: PaycheckPlan; loading?: boolean }) {
   const headline =
     plan.recommendationType === "shortfall_warning"
-      ? `Heads up — your plan shows a possible shortfall of ${fmt(Math.abs(plan.safeToSpend))}`
+      ? `Heads up — your plan shows a possible shortfall of ${fmt(Math.abs(plan.estimatedRemaining))}`
       : plan.recommendationType === "holdback"
         ? `Recommended move: hold back ${fmt(plan.recommendedHoldback)}`
         : "No required payments found before your next paycheck";
