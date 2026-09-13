@@ -82,6 +82,13 @@ function AnalyticsPage() {
         <div className="mt-8 grid gap-4 md:grid-cols-2">
           <section className="paper-card p-6">
             <h2 className="font-serif text-lg text-ink">Savings by month</h2>
+            <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-sm bg-primary" aria-hidden="true" />
+                Money you deposited that month
+              </span>
+              <span>Bar length compares months; longest = your best month</span>
+            </p>
             {months.length === 0 ? (
               <p className="mt-3 text-sm text-muted-foreground">Log a deposit to start this chart.</p>
             ) : (
@@ -102,6 +109,13 @@ function AnalyticsPage() {
 
           <section className="paper-card p-6">
             <h2 className="font-serif text-lg text-ink">Planned spending by category</h2>
+            <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-sm bg-primary/70" aria-hidden="true" />
+                Total you've planned to spend
+              </span>
+              <span>Biggest category first</span>
+            </p>
             {cats.length === 0 ? (
               <p className="mt-3 text-sm text-muted-foreground">Plan an expense to start this chart.</p>
             ) : (
@@ -118,6 +132,7 @@ function AnalyticsPage() {
               </div>
             )}
           </section>
+
 
           <section className="paper-card p-6 md:col-span-2">
             <h2 className="font-serif text-lg text-ink">Debt snapshot</h2>

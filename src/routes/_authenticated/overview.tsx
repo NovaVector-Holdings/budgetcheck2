@@ -40,19 +40,30 @@ function OverviewPage() {
     },
   });
 
+  const now = new Date();
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+  const todayStr = today();
+
   const in30 = new Date();
   in30.setDate(in30.getDate() + 30);
   const upcoming = (data?.expenses ?? []).filter((e) => e.due_date <= in30.toISOString().slice(0, 10));
+  const restOfMonth = (data?.expenses ?? []).filter((e) => e.due_date >= todayStr && e.due_date <= monthEnd);
+  const restOfMonthTotal = restOfMonth.reduce((s, e) => s + Number(e.amount), 0);
   const totalSaved = (data?.deposits ?? []).reduce((s, d) => s + Number(d.amount), 0);
   const totalDebt = (data?.debts ?? []).reduce((s, d) => s + Number(d.balance), 0);
-  const upcomingTotal = upcoming.reduce((s, e) => s + Number(e.amount), 0);
 
-  const cards = [
-    { label: "Monthly income", value: data?.profile?.monthly_income ? fmt(data.profile.monthly_income) : "Not set", to: "/settings" },
-    { label: "Total saved", value: fmt(totalSaved), to: "/savings" },
-    { label: "Total debt", value: fmt(totalDebt), to: "/debt" },
-    { label: "Due in next 30 days", value: fmt(upcomingTotal), to: "/future-expenses" },
+  const income = data?.profile?.monthly_income ?? null;
+  const estimate = income != null ? income - restOfMonthTotal : null;
+
+  // How complete is the picture? Confidence in the estimate depends on it.
+  const checks = [
+    { label: "Monthly income added", done: income != null, to: "/settings" as const },
+    { label: "Bills & expenses added", done: (data?.expenses ?? []).length > 0, to: "/future-expenses" as const },
+    { label: "Debts added", done: (data?.debts ?? []).length > 0, to: "/debt" as const },
+    { label: "A savings goal set", done: (data?.goals ?? []).length > 0, to: "/savings" as const },
   ];
+  const doneChecks = checks.filter((c) => c.done).length;
+  const nextStep = checks.find((c) => !c.done);
 
   return (
     <div>
@@ -66,18 +77,72 @@ function OverviewPage() {
         </p>
       )}
 
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {cards.map((c) => (
-          <Link key={c.label} to={c.to} className="paper-card block p-5 transition-shadow hover:shadow-md">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{c.label}</p>
-            <p className="mt-2 font-serif text-2xl text-ink">{c.value}</p>
-          </Link>
-        ))}
+      {/* The one number people said matters most, with a plain explanation of what it is. */}
+      <section className="paper-card mt-8 p-6 sm:p-8">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Estimated left this month
+        </p>
+        <p className="mt-2 font-serif text-4xl text-ink sm:text-5xl">
+          {estimate != null ? fmt(estimate) : "Add your income"}
+        </p>
+        <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">
+          {income != null ? (
+            <>
+              This is your monthly income of {fmt(income)} minus {fmt(restOfMonthTotal)} of bills and
+              expenses still due before the end of the month.
+            </>
+          ) : (
+            <>Add your monthly income in Settings and we can estimate what's left after your bills.</>
+          )}
+        </p>
+        <p className="mt-2 max-w-xl text-xs leading-relaxed text-muted-foreground">
+          It's an estimate, not a guarantee — it only knows what you've entered, and it doesn't include
+          day-to-day spending. Treat it as a ceiling, not spending money.
+        </p>
+
+        <div className="mt-5 border-t border-border pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium text-ink">
+              How complete your picture is: {doneChecks} of {checks.length}
+            </p>
+            {nextStep && (
+              <Link to={nextStep.to} className="text-sm font-medium text-primary hover:underline">
+                {nextStep.label} →
+              </Link>
+            )}
+          </div>
+          <div className="mt-2 h-1.5 rounded-full bg-secondary">
+            <div
+              className="h-1.5 rounded-full bg-primary transition-all"
+              style={{ width: `${(doneChecks / checks.length) * 100}%` }}
+            />
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {doneChecks === checks.length
+              ? "You've added everything we ask for — this estimate is as accurate as it gets."
+              : "The more you add, the more you can trust the number above."}
+          </p>
+        </div>
+      </section>
+
+      {/* Two supporting numbers only — kept separate so savings and debt don't read as one thing. */}
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <Link to="/savings" className="paper-card block p-5 transition-shadow hover:shadow-md">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Saved so far</p>
+          <p className="mt-2 font-serif text-2xl text-ink">{fmt(totalSaved)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Across your savings goals</p>
+        </Link>
+        <Link to="/debt" className="paper-card block p-5 transition-shadow hover:shadow-md">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Owed so far</p>
+          <p className="mt-2 font-serif text-2xl text-ink">{fmt(totalDebt)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">What's left on your debts</p>
+        </Link>
       </div>
 
-      <div className="mt-8 grid gap-4 md:grid-cols-2">
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
         <section className="paper-card p-6">
           <h2 className="font-serif text-lg text-ink">Coming up</h2>
+          <p className="mt-1 text-xs text-muted-foreground">Bills due in the next 30 days</p>
           {upcoming.length === 0 ? (
             <p className="mt-3 text-sm text-muted-foreground">
               Nothing due in the next 30 days.{" "}
@@ -95,24 +160,44 @@ function OverviewPage() {
               ))}
             </ul>
           )}
+          {upcoming.length > 5 && (
+            <Link to="/future-expenses" className="mt-3 inline-block text-sm font-medium text-primary hover:underline">
+              See all {upcoming.length}
+            </Link>
+          )}
         </section>
         <section className="paper-card p-6">
-          <h2 className="font-serif text-lg text-ink">Small step for today</h2>
-          <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-            A ten-minute weekly money meeting is the single habit most tied to feeling in control.
-            Your checklist is ready.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Link to="/money-meeting" className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">
-              Start a money meeting
-            </Link>
-            <Link to="/learn" className="rounded-md border border-border px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-secondary">
-              Listen to a lesson
-            </Link>
-          </div>
+          <h2 className="font-serif text-lg text-ink">One move to make next</h2>
+          {nextStep ? (
+            <>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                {nextStep.label} — that's the piece missing from your picture, and it's the fastest way to
+                make the number above worth trusting.
+              </p>
+              <Link to={nextStep.to} className="mt-4 inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+                {nextStep.label}
+              </Link>
+            </>
+          ) : (
+            <>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                A ten-minute weekly money meeting is the single habit most tied to feeling in control.
+                Your checklist is ready.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Link to="/money-meeting" className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+                  Start a money meeting
+                </Link>
+                <Link to="/learn" className="rounded-md border border-border px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-secondary">
+                  Listen to a lesson
+                </Link>
+              </div>
+            </>
+          )}
         </section>
       </div>
-      <p className="mt-6 text-xs text-muted-foreground">Today is {today()}.</p>
+      <p className="mt-6 text-xs text-muted-foreground">Today is {todayStr}.</p>
     </div>
   );
 }
+
