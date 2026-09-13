@@ -1,20 +1,26 @@
-import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import { createFileRoute, Outlet, redirect, useRouterState } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 
-const memberNav = [
+// Five everyday tools stay in reach; the rest live behind "More" so the
+// page doesn't open with eleven choices.
+const primaryNav = [
   { to: "/overview", label: "Overview" },
+  { to: "/future-expenses", label: "Bills" },
   { to: "/savings", label: "Savings" },
-  { to: "/debt", label: "Debt Strategy" },
-  { to: "/future-expenses", label: "Future Expenses" },
+  { to: "/debt", label: "Debt" },
+  { to: "/analytics", label: "Reports" },
+] as const;
+
+const moreNav = [
   { to: "/calendar", label: "Calendar" },
-  { to: "/money-meeting", label: "Money Meeting" },
-  { to: "/analytics", label: "Analytics" },
-  { to: "/import", label: "Import & Analyze" },
-  { to: "/alerts", label: "Alerts" },
-  { to: "/archives", label: "Archives" },
+  { to: "/money-meeting", label: "Money meeting" },
+  { to: "/import", label: "Import spending" },
+  { to: "/alerts", label: "Reminders" },
+  { to: "/archives", label: "Archive" },
   { to: "/settings", label: "Settings" },
 ] as const;
+
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
