@@ -13,7 +13,7 @@ export const Route = createFileRoute("/_authenticated/import")({
     meta: [
       { title: "Import spending — BudgetChek" },
       { name: "description", content: "Paste or upload a bank CSV and see where your money went, right in your browser." },
-      { property: "og:title", content: "Import & analyze — BudgetChek" },
+      { property: "og:title", content: "Import spending — BudgetChek" },
       { property: "og:description", content: "Paste or upload a bank CSV and see where your money went, right in your browser." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },

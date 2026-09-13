@@ -13,7 +13,7 @@ export const Route = createFileRoute("/_authenticated/debt")({
     meta: [
       { title: "Debt payoff — BudgetChek" },
       { name: "description", content: "List your debts, pick a payoff order, and log payments as you go." },
-      { property: "og:title", content: "Debt strategy — BudgetChek" },
+      { property: "og:title", content: "Debt payoff — BudgetChek" },
       { property: "og:description", content: "List your debts, pick a payoff order, and log payments as you go." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },

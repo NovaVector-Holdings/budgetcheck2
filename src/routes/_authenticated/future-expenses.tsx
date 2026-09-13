@@ -13,7 +13,7 @@ export const Route = createFileRoute("/_authenticated/future-expenses")({
     meta: [
       { title: "Bills & expenses — BudgetChek" },
       { name: "description", content: "Plan upcoming bills and one-time costs before they surprise you." },
-      { property: "og:title", content: "Future expenses — BudgetChek" },
+      { property: "og:title", content: "Bills & expenses — BudgetChek" },
       { property: "og:description", content: "Plan upcoming bills and one-time costs before they surprise you." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },

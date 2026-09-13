@@ -9,7 +9,7 @@ export const Route = createFileRoute("/_authenticated/alerts")({
     meta: [
       { title: "Bill reminders — BudgetChek" },
       { name: "description", content: "Upcoming bills, low savings pace, and gentle nudges — all in one place." },
-      { property: "og:title", content: "Alerts — BudgetChek" },
+      { property: "og:title", content: "Bill reminders — BudgetChek" },
       { property: "og:description", content: "Upcoming bills, low savings pace, and gentle nudges — all in one place." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },

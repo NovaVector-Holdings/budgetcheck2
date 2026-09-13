@@ -10,7 +10,7 @@ export const Route = createFileRoute("/_authenticated/archives")({
     meta: [
       { title: "Archive — BudgetChek" },
       { name: "description", content: "Archived goals, debts, expenses, and meetings. Restore them anytime." },
-      { property: "og:title", content: "Archives — BudgetChek" },
+      { property: "og:title", content: "Archive — BudgetChek" },
       { property: "og:description", content: "Archived goals, debts, expenses, and meetings. Restore them anytime." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },

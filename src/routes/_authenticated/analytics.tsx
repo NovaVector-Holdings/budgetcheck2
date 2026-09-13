@@ -8,7 +8,7 @@ export const Route = createFileRoute("/_authenticated/analytics")({
     meta: [
       { title: "Money reports — BudgetChek" },
       { name: "description", content: "See where your money stands: savings pace, debt trend, and spending by category." },
-      { property: "og:title", content: "Money analytics — BudgetChek" },
+      { property: "og:title", content: "Money reports — BudgetChek" },
       { property: "og:description", content: "See where your money stands: savings pace, debt trend, and spending by category." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
