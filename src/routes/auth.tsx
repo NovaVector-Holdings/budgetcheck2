@@ -12,6 +12,7 @@ const validateSearch = (search: Record<string, unknown>) => ({
 });
 
 export const Route = createFileRoute("/auth")({
+  ssr: false,
   validateSearch,
   head: () => ({
     meta: [
