@@ -45,7 +45,7 @@ export function LessonPlayer({ lesson }: { lesson: Lesson }) {
   };
 
   return (
-    <article className="paper-card flex flex-col gap-5 p-6">
+    <article id={lesson.id} className="paper-card flex flex-col gap-5 p-6 scroll-mt-28">
       <div className="flex items-start justify-between gap-4">
         <div>
           <span className="eyebrow">{lesson.minutes} min · Audio lesson</span>

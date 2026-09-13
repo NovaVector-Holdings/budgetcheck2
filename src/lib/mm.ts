@@ -32,6 +32,8 @@ export interface MmReservedFund {
   purpose: string | null;
   tapped_amount: number;
   archived: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface MmSpendingCap {
@@ -87,6 +89,7 @@ export interface MmPriorityOverride {
   label: string;
   tier: number;
   reason: string | null;
+  created_at: string;
 }
 
 export interface MmSession {

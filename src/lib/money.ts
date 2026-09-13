@@ -3,6 +3,12 @@ export const fmt = (n: number | null | undefined) =>
 
 export const today = () => new Date().toISOString().slice(0, 10);
 
+export const addMonths = (iso: string, n: number) => {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1 + n, d));
+  return dt.toISOString().slice(0, 10);
+};
+
 export interface Profile {
   id: string;
   display_name: string | null;

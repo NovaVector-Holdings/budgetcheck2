@@ -1,8 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { fmt, today, type Debt, type SavingsDeposit, type SavingsGoal } from "@/lib/money";
+import { addMonths, fmt, today, type MoneyMeeting } from "@/lib/money";
+import { evaluateDebt, formatDay, FUNDING_TIERS } from "@/lib/decision-engine";
 import { parseStatement, reviewStatement, type Txn } from "@/lib/statement-review";
+import { computeChangesSince } from "@/lib/changes-since";
+import { recommendLesson } from "@/lib/learn-recommend";
+import { LearnRecommendation } from "@/components/mm/learn-recommendation";
+import type { useMoneyState } from "@/hooks/use-money-state";
 import { StatementReport } from "@/components/statement-report";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +16,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
+type MoneyState = ReturnType<typeof useMoneyState>;
 type Step = "intro" | "file" | "balances" | "report";
+
+/** Distinguishes a monthly-review record from a weekly check-in -- both are
+ *  saved into the same money_meetings table. See weekly-check-in.tsx for the
+ *  mirror-image discriminator. */
+const isMonthlyRecord = (m: MoneyMeeting) =>
+  (m.checklist ?? []).some((c) => c.label === "Brought a statement to review");
 
 function Coach({ line, sub }: { line: string; sub?: string }) {
   return (
@@ -31,7 +43,17 @@ function Coach({ line, sub }: { line: string; sub?: string }) {
   );
 }
 
-export function CoachSession({ userId, monthlyIncome }: { userId: string; monthlyIncome: number | null }) {
+export function CoachSession({
+  userId,
+  monthlyIncome,
+  state,
+  onGoToData,
+}: {
+  userId: string;
+  monthlyIncome: number | null;
+  state: MoneyState;
+  onGoToData: () => void;
+}) {
   const qc = useQueryClient();
   const [step, setStep] = useState<Step>("intro");
   const [text, setText] = useState("");
@@ -41,35 +63,35 @@ export function CoachSession({ userId, monthlyIncome }: { userId: string; monthl
   const [notes, setNotes] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const { goals, debts, savedByGoal, expenses, caps, rules, overrides, reserved, deposits, engineInput, snapshot } = state;
+
   const review = useMemo(() => (txns.length ? reviewStatement(txns) : null), [txns]);
 
-  const { data: goals = [] } = useQuery({
-    queryKey: ["goals", userId],
+  const { data: meetings = [] } = useQuery({
+    queryKey: ["meetings", userId],
     queryFn: async () => {
-      const { data } = await supabase.from("savings_goals").select("*").eq("archived", false).order("created_at");
-      return (data ?? []) as SavingsGoal[];
+      const { data } = await supabase
+        .from("money_meetings")
+        .select("*")
+        .eq("archived", false)
+        .order("held_on", { ascending: false });
+      return (data ?? []) as unknown as MoneyMeeting[];
     },
   });
-  const { data: deposits = [] } = useQuery({
-    queryKey: ["deposits", userId],
-    queryFn: async () => {
-      const { data } = await supabase.from("savings_deposits").select("*");
-      return (data ?? []) as SavingsDeposit[];
-    },
-  });
-  const { data: debts = [] } = useQuery({
-    queryKey: ["debts", userId],
-    queryFn: async () => {
-      const { data } = await supabase.from("debts").select("*").eq("archived", false).order("created_at");
-      return (data ?? []) as Debt[];
-    },
-  });
+  const lastMonthly = useMemo(() => meetings.find((m) => isMonthlyRecord(m)) ?? null, [meetings]);
 
-  const savedByGoal = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const d of deposits) m.set(d.goal_id, (m.get(d.goal_id) ?? 0) + Number(d.amount));
-    return m;
-  }, [deposits]);
+  const changesSinceLastReview = useMemo(
+    () =>
+      computeChangesSince(lastMonthly?.created_at ?? null, {
+        expenses,
+        debts,
+        goals,
+        overrides,
+        reserved,
+        deposits,
+      }),
+    [lastMonthly, expenses, debts, goals, overrides, reserved, deposits],
+  );
 
   function startAnalyze(raw: string) {
     const parsed = parseStatement(raw);
@@ -127,6 +149,35 @@ export function CoachSession({ userId, monthlyIncome }: { userId: string; monthl
 
     return { wins, gaps };
   }, [goals, debts, savedByGoal, balances, review, monthlyIncome]);
+
+  // Bills / cash flow — planned vs. actual using only what's on file. No
+  // invented assumptions about anything not marked paid/unpaid.
+  const billsSummary = useMemo(() => {
+    const live = expenses.filter((e) => !e.archived);
+    const paid = live.filter((e) => e.paid);
+    const unpaid = live.filter((e) => !e.paid);
+    const overdue = unpaid.filter((e) => e.due_date < today());
+    return { total: live.length, paidCount: paid.length, unpaidCount: unpaid.length, overdue };
+  }, [expenses]);
+
+  // Debt — payoff-direction note for the highest-APR debt, using the same
+  // deterministic evaluator the assistant and weekly check-in read from.
+  // Never a projection beyond what evaluateDebt itself already states.
+  const debtDirection = useMemo(() => {
+    if (!debts.length) return null;
+    const highest = [...debts].sort((a, b) => Number(b.apr ?? 0) - Number(a.apr ?? 0))[0];
+    if (!snapshot.window) return null;
+    return evaluateDebt(engineInput, highest.id, snapshot.window);
+  }, [debts, engineInput, snapshot.window]);
+
+  // Spending / patterns — only real, already-configured caps and rules.
+  const capsWithGaps = useMemo(() => caps.filter((c) => c.instrument_limit != null && Number(c.instrument_limit) > Number(c.cap_amount)), [caps]);
+
+  const shortfall = !!snapshot.funding && snapshot.funding.available - snapshot.funding.totalRequested < 0;
+  const recommendation = useMemo(
+    () => recommendLesson({ shortfall, goals, savedByGoal, debts, caps }),
+    [shortfall, goals, savedByGoal, debts, caps],
+  );
 
   const finish = useMutation({
     mutationFn: async () => {
@@ -202,6 +253,14 @@ export function CoachSession({ userId, monthlyIncome }: { userId: string; monthl
           line="Ready for your monthly review?"
           sub="We'll do it in three short moves: look at a statement together, update what you've saved and what you owe, then read back your wins and your gaps side by side. Around ten minutes. Nothing here is graded."
         />
+        {lastMonthly && changesSinceLastReview.length > 0 && (
+          <div className="mt-5 rounded-lg border border-border bg-secondary/40 p-4">
+            <p className="eyebrow">Since your last monthly review</p>
+            <ul className="mt-2 space-y-1 text-sm text-ink">
+              {changesSinceLastReview.slice(0, 6).map((c, i) => <li key={i}>• {c.text}</li>)}
+            </ul>
+          </div>
+        )}
         <div className="mt-5 flex flex-wrap gap-2">
           <Button onClick={() => setStep("file")}>Start the review</Button>
           <Button variant="outline" onClick={() => setStep("balances")}>Skip the statement</Button>
@@ -322,6 +381,7 @@ export function CoachSession({ userId, monthlyIncome }: { userId: string; monthl
 
   return (
     <div className="mt-6 space-y-6">
+      {/* 1. Month in review */}
       <div className="paper-card p-6">
         <Coach
           line={status.wins.length >= status.gaps.length ? "Good month. Here's what stood out." : "Mixed month — and that's normal. Here's the whole picture."}
@@ -343,20 +403,102 @@ export function CoachSession({ userId, monthlyIncome }: { userId: string; monthl
         </div>
       </div>
 
-      {review && <StatementReport review={review} />}
-
+      {/* 2. Bills / cash flow */}
       <div className="paper-card p-6">
-        <h3 className="font-serif text-lg text-ink">One move for next month</h3>
+        <h3 className="font-serif text-lg text-ink">Bills &amp; cash flow</h3>
+        <p className="mt-1 text-sm text-muted-foreground">Planned vs. actual, from what's marked paid — nothing guessed about the rest.</p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <div>
+            <p className="text-xs text-muted-foreground">Bills tracked</p>
+            <p className="mt-1 font-serif text-xl text-ink">{billsSummary.total}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Marked paid</p>
+            <p className="mt-1 font-serif text-xl text-ink">{billsSummary.paidCount}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Past due, still unpaid</p>
+            <p className={`mt-1 font-serif text-xl ${billsSummary.overdue.length ? "text-destructive" : "text-ink"}`}>{billsSummary.overdue.length}</p>
+          </div>
+        </div>
+        {billsSummary.overdue.length > 0 && (
+          <ul className="mt-3 space-y-1 text-sm text-ink">
+            {billsSummary.overdue.map((e) => (
+              <li key={e.id}>{e.name} — was due {formatDay(e.due_date)}, still shows unpaid on file.</li>
+            ))}
+          </ul>
+        )}
+        {review && <StatementReport review={review} />}
+      </div>
+
+      {/* 3 & 4. Savings and debt already covered above in wins/gaps; debt payoff direction added here. */}
+      {debtDirection && (
+        <div className="paper-card p-6">
+          <h3 className="font-serif text-lg text-ink">Debt — payoff direction</h3>
+          <p className="mt-2 text-sm text-ink">{debtDirection.reason}</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            For {debtDirection.creditor}. This reads the same funding math the weekly check-in and the assistant use — it isn't a separate projection.
+          </p>
+        </div>
+      )}
+
+      {/* 5. Spending / patterns */}
+      <div className="paper-card p-6">
+        <h3 className="font-serif text-lg text-ink">Spending &amp; patterns</h3>
+        <p className="mt-1 text-sm text-muted-foreground">Only the caps and rules you've already set — no new statement analysis beyond what's above.</p>
+        {caps.length > 0 ? (
+          <ul className="mt-3 space-y-1 text-sm text-ink">
+            {caps.map((c) => (
+              <li key={c.id} className={capsWithGaps.includes(c) ? "text-destructive" : ""}>
+                {c.category}: {fmt(Number(c.cap_amount))}/mo cap{capsWithGaps.includes(c) ? " — card behind it allows more than the cap" : ""}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-2 text-sm text-muted-foreground">No spending caps set yet — add one under Your Numbers to track this here.</p>
+        )}
+        {rules.length > 0 && (
+          <p className="mt-2 text-xs text-muted-foreground">{rules.length} pattern rule{rules.length === 1 ? "" : "s"} on file for reading uploaded statements.</p>
+        )}
+      </div>
+
+      {/* 7. Next month plan */}
+      <div className="paper-card p-6">
+        <h3 className="font-serif text-lg text-ink">Next month's plan</h3>
         <p className="mt-1 text-sm text-muted-foreground">
           Pick the smallest thing that closes the biggest gap above — one line, in your own words.
         </p>
         <Textarea className="mt-3" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Cap cash-app transfers at $150 and put the rest toward the credit card." />
-        <div className="mt-4 flex flex-wrap gap-2">
+
+        <div className="mt-4 rounded-lg border border-border p-4">
+          <p className="eyebrow">What you've said matters most</p>
+          {overrides.length > 0 ? (
+            <ul className="mt-2 space-y-1 text-sm text-ink">
+              {overrides.map((o) => (
+                <li key={o.id}>{o.label} — {FUNDING_TIERS[o.tier - 1]?.label}{o.reason ? ` (${o.reason})` : ""}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1 text-sm text-muted-foreground">Nothing set yet.</p>
+          )}
+          <button type="button" className="mt-2 text-sm text-primary underline hover:no-underline" onClick={onGoToData}>
+            Adjust priorities under Your Numbers
+          </button>
+        </div>
+
+        {recommendation && (
+          <div className="mt-4">
+            <LearnRecommendation lesson={recommendation.lesson} because={recommendation.because} />
+          </div>
+        )}
+
+        {/* 8. Closeout */}
+        <div className="mt-5 flex flex-wrap gap-2">
           <Button onClick={() => finish.mutate()} disabled={finish.isPending}>Save this review</Button>
           <Button variant="outline" onClick={() => setStep("balances")}>Back to balances</Button>
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
-          Saving records your updated balances and files this review under Archive. It isn't financial advice.
+          Saving records your updated balances and files this review under Archive. Next monthly review: around {formatDay(addMonths(today(), 1))}. Not financial advice.
         </p>
       </div>
     </div>

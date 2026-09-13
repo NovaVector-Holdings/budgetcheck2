@@ -411,7 +411,7 @@ export interface DebtDecision {
   constrainedBy: string | null;
 }
 
-const HIGH_APR = 15;
+export const HIGH_APR = 15;
 
 export function evaluateDebt(input: EngineInput, debtId: string, window: Window): DebtDecision | null {
   const debt = input.obligations.debts.find((d) => d.id === debtId);
