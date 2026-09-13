@@ -35,6 +35,11 @@ function SettingsPage() {
   const [threshold, setThreshold] = useState("");
   const [weekly, setWeekly] = useState(true);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [freq, setFreq] = useState<PayFrequency | "">("");
+  const [nextPay, setNextPay] = useState("");
+  const [secondPay, setSecondPay] = useState("");
+  const [lowIncome, setLowIncome] = useState("");
+  const [method, setMethod] = useState<BudgetMethod>("fifty_thirty_twenty");
 
   const { data } = useQuery({
     queryKey: ["settings", user.id],
