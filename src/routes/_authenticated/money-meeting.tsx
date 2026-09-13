@@ -93,7 +93,8 @@ const TABS: { key: Tab; nav: string; eyebrow: string; heading: string; caption: 
 function MoneyMeetingPage() {
   const { user } = Route.useRouteContext();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>("weekly");
+  const search = Route.useSearch();
+  const [tab, setTab] = useState<Tab>(search.tab ?? "weekly");
   const state = useMoneyState(user.id);
   const meta = TABS.find((t) => t.key === tab)!;
 
