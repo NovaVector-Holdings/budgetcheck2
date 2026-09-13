@@ -10,16 +10,36 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ReadRouteImport } from './routes/read'
 import { Route as LearnRouteImport } from './routes/learn'
 import { Route as HelpRouteImport } from './routes/help'
 import { Route as EarnRouteImport } from './routes/earn'
+import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AboutRouteImport } from './routes/about'
+import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
+import { Route as AuthenticatedSavingsRouteImport } from './routes/_authenticated/savings'
+import { Route as AuthenticatedOverviewRouteImport } from './routes/_authenticated/overview'
+import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authenticated/onboarding'
+import { Route as AuthenticatedMoneyMeetingRouteImport } from './routes/_authenticated/money-meeting'
+import { Route as AuthenticatedImportRouteImport } from './routes/_authenticated/import'
+import { Route as AuthenticatedFutureExpensesRouteImport } from './routes/_authenticated/future-expenses'
+import { Route as AuthenticatedDebtRouteImport } from './routes/_authenticated/debt'
+import { Route as AuthenticatedCalendarRouteImport } from './routes/_authenticated/calendar'
+import { Route as AuthenticatedArchivesRouteImport } from './routes/_authenticated/archives'
+import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
+import { Route as AuthenticatedAlertsRouteImport } from './routes/_authenticated/alerts'
 
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   id: '/sitemap.xml',
   path: '/sitemap.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReadRoute = ReadRouteImport.update({
@@ -42,9 +62,18 @@ const EarnRoute = EarnRouteImport.update({
   path: '/earn',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AboutRoute = AboutRouteImport.update({
   id: '/about',
   path: '/about',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+  id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -52,65 +81,223 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedSavingsRoute = AuthenticatedSavingsRouteImport.update({
+  id: '/savings',
+  path: '/savings',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedOverviewRoute = AuthenticatedOverviewRouteImport.update({
+  id: '/overview',
+  path: '/overview',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedOnboardingRoute = AuthenticatedOnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedMoneyMeetingRoute =
+  AuthenticatedMoneyMeetingRouteImport.update({
+    id: '/money-meeting',
+    path: '/money-meeting',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedImportRoute = AuthenticatedImportRouteImport.update({
+  id: '/import',
+  path: '/import',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedFutureExpensesRoute =
+  AuthenticatedFutureExpensesRouteImport.update({
+    id: '/future-expenses',
+    path: '/future-expenses',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedDebtRoute = AuthenticatedDebtRouteImport.update({
+  id: '/debt',
+  path: '/debt',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedCalendarRoute = AuthenticatedCalendarRouteImport.update({
+  id: '/calendar',
+  path: '/calendar',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedArchivesRoute = AuthenticatedArchivesRouteImport.update({
+  id: '/archives',
+  path: '/archives',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedAnalyticsRoute = AuthenticatedAnalyticsRouteImport.update({
+  id: '/analytics',
+  path: '/analytics',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedAlertsRoute = AuthenticatedAlertsRouteImport.update({
+  id: '/alerts',
+  path: '/alerts',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/auth': typeof AuthRoute
   '/earn': typeof EarnRoute
   '/help': typeof HelpRoute
   '/learn': typeof LearnRoute
   '/read': typeof ReadRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/alerts': typeof AuthenticatedAlertsRoute
+  '/analytics': typeof AuthenticatedAnalyticsRoute
+  '/archives': typeof AuthenticatedArchivesRoute
+  '/calendar': typeof AuthenticatedCalendarRoute
+  '/debt': typeof AuthenticatedDebtRoute
+  '/future-expenses': typeof AuthenticatedFutureExpensesRoute
+  '/import': typeof AuthenticatedImportRoute
+  '/money-meeting': typeof AuthenticatedMoneyMeetingRoute
+  '/onboarding': typeof AuthenticatedOnboardingRoute
+  '/overview': typeof AuthenticatedOverviewRoute
+  '/savings': typeof AuthenticatedSavingsRoute
+  '/settings': typeof AuthenticatedSettingsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/auth': typeof AuthRoute
   '/earn': typeof EarnRoute
   '/help': typeof HelpRoute
   '/learn': typeof LearnRoute
   '/read': typeof ReadRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/alerts': typeof AuthenticatedAlertsRoute
+  '/analytics': typeof AuthenticatedAnalyticsRoute
+  '/archives': typeof AuthenticatedArchivesRoute
+  '/calendar': typeof AuthenticatedCalendarRoute
+  '/debt': typeof AuthenticatedDebtRoute
+  '/future-expenses': typeof AuthenticatedFutureExpensesRoute
+  '/import': typeof AuthenticatedImportRoute
+  '/money-meeting': typeof AuthenticatedMoneyMeetingRoute
+  '/onboarding': typeof AuthenticatedOnboardingRoute
+  '/overview': typeof AuthenticatedOverviewRoute
+  '/savings': typeof AuthenticatedSavingsRoute
+  '/settings': typeof AuthenticatedSettingsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/about': typeof AboutRoute
+  '/auth': typeof AuthRoute
   '/earn': typeof EarnRoute
   '/help': typeof HelpRoute
   '/learn': typeof LearnRoute
   '/read': typeof ReadRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/_authenticated/alerts': typeof AuthenticatedAlertsRoute
+  '/_authenticated/analytics': typeof AuthenticatedAnalyticsRoute
+  '/_authenticated/archives': typeof AuthenticatedArchivesRoute
+  '/_authenticated/calendar': typeof AuthenticatedCalendarRoute
+  '/_authenticated/debt': typeof AuthenticatedDebtRoute
+  '/_authenticated/future-expenses': typeof AuthenticatedFutureExpensesRoute
+  '/_authenticated/import': typeof AuthenticatedImportRoute
+  '/_authenticated/money-meeting': typeof AuthenticatedMoneyMeetingRoute
+  '/_authenticated/onboarding': typeof AuthenticatedOnboardingRoute
+  '/_authenticated/overview': typeof AuthenticatedOverviewRoute
+  '/_authenticated/savings': typeof AuthenticatedSavingsRoute
+  '/_authenticated/settings': typeof AuthenticatedSettingsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/about'
+    | '/auth'
     | '/earn'
     | '/help'
     | '/learn'
     | '/read'
+    | '/reset-password'
     | '/sitemap.xml'
+    | '/alerts'
+    | '/analytics'
+    | '/archives'
+    | '/calendar'
+    | '/debt'
+    | '/future-expenses'
+    | '/import'
+    | '/money-meeting'
+    | '/onboarding'
+    | '/overview'
+    | '/savings'
+    | '/settings'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/about' | '/earn' | '/help' | '/learn' | '/read' | '/sitemap.xml'
+  to:
+    | '/'
+    | '/about'
+    | '/auth'
+    | '/earn'
+    | '/help'
+    | '/learn'
+    | '/read'
+    | '/reset-password'
+    | '/sitemap.xml'
+    | '/alerts'
+    | '/analytics'
+    | '/archives'
+    | '/calendar'
+    | '/debt'
+    | '/future-expenses'
+    | '/import'
+    | '/money-meeting'
+    | '/onboarding'
+    | '/overview'
+    | '/savings'
+    | '/settings'
   id:
     | '__root__'
     | '/'
+    | '/_authenticated'
     | '/about'
+    | '/auth'
     | '/earn'
     | '/help'
     | '/learn'
     | '/read'
+    | '/reset-password'
     | '/sitemap.xml'
+    | '/_authenticated/alerts'
+    | '/_authenticated/analytics'
+    | '/_authenticated/archives'
+    | '/_authenticated/calendar'
+    | '/_authenticated/debt'
+    | '/_authenticated/future-expenses'
+    | '/_authenticated/import'
+    | '/_authenticated/money-meeting'
+    | '/_authenticated/onboarding'
+    | '/_authenticated/overview'
+    | '/_authenticated/savings'
+    | '/_authenticated/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AboutRoute: typeof AboutRoute
+  AuthRoute: typeof AuthRoute
   EarnRoute: typeof EarnRoute
   HelpRoute: typeof HelpRoute
   LearnRoute: typeof LearnRoute
   ReadRoute: typeof ReadRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
 }
 
@@ -121,6 +308,13 @@ declare module '@tanstack/react-router' {
       path: '/sitemap.xml'
       fullPath: '/sitemap.xml'
       preLoaderRoute: typeof SitemapDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/read': {
@@ -151,11 +345,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EarnRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/about': {
       id: '/about'
       path: '/about'
       fullPath: '/about'
       preLoaderRoute: typeof AboutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -165,16 +373,136 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/settings': {
+      id: '/_authenticated/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AuthenticatedSettingsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/savings': {
+      id: '/_authenticated/savings'
+      path: '/savings'
+      fullPath: '/savings'
+      preLoaderRoute: typeof AuthenticatedSavingsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/overview': {
+      id: '/_authenticated/overview'
+      path: '/overview'
+      fullPath: '/overview'
+      preLoaderRoute: typeof AuthenticatedOverviewRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/onboarding': {
+      id: '/_authenticated/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof AuthenticatedOnboardingRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/money-meeting': {
+      id: '/_authenticated/money-meeting'
+      path: '/money-meeting'
+      fullPath: '/money-meeting'
+      preLoaderRoute: typeof AuthenticatedMoneyMeetingRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/import': {
+      id: '/_authenticated/import'
+      path: '/import'
+      fullPath: '/import'
+      preLoaderRoute: typeof AuthenticatedImportRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/future-expenses': {
+      id: '/_authenticated/future-expenses'
+      path: '/future-expenses'
+      fullPath: '/future-expenses'
+      preLoaderRoute: typeof AuthenticatedFutureExpensesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/debt': {
+      id: '/_authenticated/debt'
+      path: '/debt'
+      fullPath: '/debt'
+      preLoaderRoute: typeof AuthenticatedDebtRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/calendar': {
+      id: '/_authenticated/calendar'
+      path: '/calendar'
+      fullPath: '/calendar'
+      preLoaderRoute: typeof AuthenticatedCalendarRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/archives': {
+      id: '/_authenticated/archives'
+      path: '/archives'
+      fullPath: '/archives'
+      preLoaderRoute: typeof AuthenticatedArchivesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/analytics': {
+      id: '/_authenticated/analytics'
+      path: '/analytics'
+      fullPath: '/analytics'
+      preLoaderRoute: typeof AuthenticatedAnalyticsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/alerts': {
+      id: '/_authenticated/alerts'
+      path: '/alerts'
+      fullPath: '/alerts'
+      preLoaderRoute: typeof AuthenticatedAlertsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
+interface AuthenticatedRouteRouteChildren {
+  AuthenticatedAlertsRoute: typeof AuthenticatedAlertsRoute
+  AuthenticatedAnalyticsRoute: typeof AuthenticatedAnalyticsRoute
+  AuthenticatedArchivesRoute: typeof AuthenticatedArchivesRoute
+  AuthenticatedCalendarRoute: typeof AuthenticatedCalendarRoute
+  AuthenticatedDebtRoute: typeof AuthenticatedDebtRoute
+  AuthenticatedFutureExpensesRoute: typeof AuthenticatedFutureExpensesRoute
+  AuthenticatedImportRoute: typeof AuthenticatedImportRoute
+  AuthenticatedMoneyMeetingRoute: typeof AuthenticatedMoneyMeetingRoute
+  AuthenticatedOnboardingRoute: typeof AuthenticatedOnboardingRoute
+  AuthenticatedOverviewRoute: typeof AuthenticatedOverviewRoute
+  AuthenticatedSavingsRoute: typeof AuthenticatedSavingsRoute
+  AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
+}
+
+const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedAlertsRoute: AuthenticatedAlertsRoute,
+  AuthenticatedAnalyticsRoute: AuthenticatedAnalyticsRoute,
+  AuthenticatedArchivesRoute: AuthenticatedArchivesRoute,
+  AuthenticatedCalendarRoute: AuthenticatedCalendarRoute,
+  AuthenticatedDebtRoute: AuthenticatedDebtRoute,
+  AuthenticatedFutureExpensesRoute: AuthenticatedFutureExpensesRoute,
+  AuthenticatedImportRoute: AuthenticatedImportRoute,
+  AuthenticatedMoneyMeetingRoute: AuthenticatedMoneyMeetingRoute,
+  AuthenticatedOnboardingRoute: AuthenticatedOnboardingRoute,
+  AuthenticatedOverviewRoute: AuthenticatedOverviewRoute,
+  AuthenticatedSavingsRoute: AuthenticatedSavingsRoute,
+  AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
+}
+
+const AuthenticatedRouteRouteWithChildren =
+  AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AboutRoute: AboutRoute,
+  AuthRoute: AuthRoute,
   EarnRoute: EarnRoute,
   HelpRoute: HelpRoute,
   LearnRoute: LearnRoute,
   ReadRoute: ReadRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
 }
 export const routeTree = rootRouteImport
