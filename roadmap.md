@@ -28,4 +28,4 @@
 - [x] Monthly guided review session in Money meeting (guide avatar, CSV step with loading spinner, balance updates with pause, report + next move, saved to Archive)
 - [x] "More" tab now opens and closes the extra tools row
 
-- [ ] Debt-free date: projection chart on Debt, card on Overview, hero promise on home
+- [x] Debt-free date: projection chart on Debt, card on Overview, hero promise on home
