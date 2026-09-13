@@ -17,10 +17,11 @@
 - [x] Audit every Overview card against consumer-finance dashboard principles
 - [x] Remove, consolidate, or relocate low-value and duplicate information
 - [x] Clarify current balance versus forward-looking estimates
-- [ ] Validate the revised hierarchy on desktop and mobile
+- [x] Validate the revised hierarchy on desktop and mobile
 - [x] Keep a visible, compact debt-free goal link/graphic on Overview.
-- [ ] Confirm Overview presents one actual balance, one forecast, and one next action without duplicate cards.
-- [ ] Confirm sign-in loads without hydration errors.
+- [x] Confirm Overview presents one actual balance, one forecast, and one next action without duplicate cards.
+- [x] Confirm sign-in loads without hydration errors.
+
 
 
 
