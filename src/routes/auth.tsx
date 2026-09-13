@@ -12,8 +12,8 @@ const validateSearch = (search: Record<string, unknown>) => ({
 });
 
 export const Route = createFileRoute("/auth")({
-  ssr: false,
   validateSearch,
+
   head: () => ({
     meta: [
       { title: "Sign in or create your account — BudgetChek" },
