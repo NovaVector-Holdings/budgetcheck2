@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { type AlertSettings, type Profile } from "@/lib/money";
+import { PAY_FREQUENCIES, type PayFrequency } from "@/lib/paycheck";
+import { BUDGET_METHODS, type BudgetMethod } from "@/lib/budget-methods";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
