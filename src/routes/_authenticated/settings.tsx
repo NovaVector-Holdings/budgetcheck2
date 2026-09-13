@@ -60,6 +60,11 @@ function SettingsPage() {
       setName(data.profile.display_name ?? "");
       setIncome(data.profile.monthly_income != null ? String(data.profile.monthly_income) : "");
       setGoal(data.profile.money_goal ?? "");
+      setFreq((data.profile.pay_frequency ?? "") as PayFrequency | "");
+      setNextPay(data.profile.next_pay_date ?? "");
+      setSecondPay(data.profile.second_pay_date ?? "");
+      setLowIncome(data.profile.income_low_estimate != null ? String(data.profile.income_low_estimate) : "");
+      setMethod((data.profile.budget_method ?? "fifty_thirty_twenty") as BudgetMethod);
     }
     if (data?.alerts) {
       setDays(String(data.alerts.expense_reminder_days));
