@@ -17,3 +17,9 @@
 
 ## Open
 - [x] Hero on homepage with two value cards (learn + my money), verified desktop + mobile
+
+## Survey + competitor alignment (Sept 13)
+- [x] Overview leads with "Estimated left this month" + plain math, caution, completeness meter
+- [x] Chart keys added to Reports
+- [x] Nav cut to 5 primary tools (Overview, Bills, Savings, Debt, Reports) + "More"
+- [x] Renames: Future Expenses→Bills & expenses, Analytics→Reports, Debt Strategy→Debt, Import & Analyze→Import spending, Alerts→Reminders, Archives→Archive
