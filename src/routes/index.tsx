@@ -93,6 +93,13 @@ function Home() {
               >
                 Browse free guides
               </Link>
+              <Link
+                to="/auth"
+                search={{ redirect: undefined }}
+                className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-5 py-3 text-sm font-semibold text-ink hover:bg-secondary"
+              >
+                Create a free account
+              </Link>
             </div>
 
             <div className="mt-8 flex items-center gap-2 text-sm text-muted-foreground">
