@@ -148,7 +148,7 @@ export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }
 
   const remove = useMutation({
     mutationFn: async ({ table, id }: { table: string; id: string }) => {
-      const { error } = await supabase.from(table).delete().eq("id", id);
+      const { error } = await (supabase as any).from(table).delete().eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => refresh("mm_accounts", "mm_reserved", "mm_caps", "mm_rules", "mm_overrides"),
