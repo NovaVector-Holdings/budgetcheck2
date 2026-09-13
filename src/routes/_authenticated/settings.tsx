@@ -207,8 +207,79 @@ function SettingsPage() {
             <Input id="set-goal" value={goal} onChange={(e) => setGoal(e.target.value)} />
           </div>
         </div>
+        <div className="border-t border-border pt-4">
+          <h3 className="text-sm font-medium text-ink">Your pay schedule</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            This is what lets us answer "am I okay until my next paycheck?" Without it we say what's missing
+            instead of guessing.
+          </p>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="set-freq">How often you get paid</Label>
+              <select
+                id="set-freq"
+                value={freq}
+                onChange={(e) => setFreq(e.target.value as PayFrequency | "")}
+                className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm text-ink"
+              >
+                <option value="">Choose one</option>
+                {PAY_FREQUENCIES.map((f) => (
+                  <option key={f.value} value={f.value}>{f.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="set-nextpay">Next payday</Label>
+              <Input id="set-nextpay" type="date" value={nextPay} onChange={(e) => setNextPay(e.target.value)} />
+            </div>
+            {freq === "semimonthly" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="set-secondpay">Second payday that month</Label>
+                <Input id="set-secondpay" type="date" value={secondPay} onChange={(e) => setSecondPay(e.target.value)} />
+              </div>
+            )}
+            {freq === "irregular" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="set-lowincome">The least you expect to be paid</Label>
+                <Input id="set-lowincome" type="number" min="0" step="0.01" value={lowIncome} onChange={(e) => setLowIncome(e.target.value)} placeholder="e.g. 1200" />
+                <p className="text-xs text-muted-foreground">We plan with the low number, never the hopeful one.</p>
+              </div>
+            )}
+          </div>
+        </div>
         <Button type="submit" disabled={saveProfile.isPending}>Save profile</Button>
       </form>
+
+      <section className="paper-card mt-6 p-6">
+        <h2 className="font-serif text-lg text-ink">Budget method</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Pick one. Your Overview shows only the method you choose — comparing frameworks side by side is what
+          makes budgeting feel complicated.
+        </p>
+        <div className="mt-4 space-y-3">
+          {BUDGET_METHODS.map((m) => {
+            const selected = method === m.value;
+            return (
+              <button
+                key={m.value}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => { setMethod(m.value); saveMethod.mutate(m.value); }}
+                className={`block w-full rounded-lg border p-4 text-left transition-colors ${selected ? "border-primary bg-primary/5" : "border-border hover:bg-secondary"}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-ink">{m.label}</span>
+                  {selected && <span className="text-xs font-medium text-primary">Selected</span>}
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">{m.tagline}</p>
+                <p className="mt-2 text-xs text-muted-foreground">Best if: {m.bestFor}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{m.source}</p>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
 
       <form className="paper-card mt-6 space-y-4 p-6" onSubmit={(e) => { e.preventDefault(); saveAlerts.mutate(); }}>
         <h2 className="font-serif text-lg text-ink">Alert preferences</h2>
