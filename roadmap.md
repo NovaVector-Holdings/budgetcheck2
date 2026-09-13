@@ -29,3 +29,25 @@
 - [x] "More" tab now opens and closes the extra tools row
 
 - [x] Debt-free date: projection chart on Debt, card on Overview, hero promise on home
+
+## Legacy-app feature review (Sept 13) — full scope
+Source: uploaded `money-meeting-build-prompt.md` (76 features, 8 areas from paycheck-planner-plus).
+Review team: build lead (CTO), UX lead, marketing judge (competitor + literacy-org alignment).
+
+Research verdict (marketing judge, real sources):
+- 50/30/20 taught by CFPB (flyer + high-school Building Blocks activity); envelope/cash-stuffing taught by university extension + CUNY OER; zero-based real but commercially branded (YNAB/Ramsey/Fidelity) and matches FDIC Money Smart Module 4's "assign every dollar" plan.
+- "Snowball budget" is Ramsey-branded whole-budget framing — do NOT ship as a budget method; keep snowball only as debt-payoff order.
+- Pay-yourself-first = savings-automation principle, layer it on, not a 4th method.
+- "Safe to spend / payday view" exists in Rocket Money (Payday View) and PocketGuard (In My Pocket) — both require bank linking. Manual-entry version is our differentiator.
+- CFPB + Penn State Extension both publish separate irregular-income guidance → letting users pick a method is supported.
+
+Build tasks:
+- [ ] Cash on hand + pay schedule inputs (new `financial_snapshots`-style fields; manual entry only, no bank link)
+- [ ] Paycheck-cycle engine: obligations due before next payday, holdback, safe-to-spend, risk level; returns "needs more info" instead of guessing
+- [ ] "Am I okay until my next paycheck?" card on Overview
+- [ ] "Your next money move" card on Overview
+- [ ] Educational-not-advice disclaimer on every recommendation surface
+- [ ] Budget method picker (50/30/20, Zero-based, Envelope) — one method shown at a time, chosen in Settings, with a "which fits me?" helper
+- [ ] Needs/wants category buckets shared across methods (exhaustive map so a new category can't fall through)
+- [ ] Review remaining legacy features (transaction analysis red flags, subscription audit, spending caps, month archive) and adopt only what doesn't re-crowd the app
+- [ ] Do NOT build: 7-step archived-month meeting wizard, gamification streaks, month-snapshot system (covered by existing Money meeting + Import spending)
