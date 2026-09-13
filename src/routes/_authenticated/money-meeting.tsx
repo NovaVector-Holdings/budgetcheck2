@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { CoachSession } from "@/components/coach-session";
 
 export const Route = createFileRoute("/_authenticated/money-meeting")({
   head: () => ({
@@ -25,9 +26,18 @@ export const Route = createFileRoute("/_authenticated/money-meeting")({
 function MoneyMeetingPage() {
   const { user } = Route.useRouteContext();
   const qc = useQueryClient();
+  const [mode, setMode] = useState<"weekly" | "monthly">("weekly");
   const [active, setActive] = useState(false);
   const [checklist, setChecklist] = useState<MeetingChecklistItem[]>(DEFAULT_MEETING_CHECKLIST);
   const [notes, setNotes] = useState("");
+
+  const { data: profile } = useQuery({
+    queryKey: ["profile", user.id],
+    queryFn: async () => {
+      const { data } = await supabase.from("profiles").select("monthly_income").eq("id", user.id).maybeSingle();
+      return data as { monthly_income: number | null } | null;
+    },
+  });
 
   const { data: meetings = [] } = useQuery({
     queryKey: ["meetings", user.id],
@@ -67,11 +77,28 @@ function MoneyMeetingPage() {
       <p className="eyebrow">Money Meeting</p>
       <h1 className="mt-2 font-serif text-3xl text-ink">Ten minutes with your money</h1>
       <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-        A money meeting is a short weekly check-in — alone, with a partner, or with a friend.
-        Same time each week works best. Run through the checklist, jot a note, done.
+        A money meeting is a short check-in — alone, with a partner, or with a friend. Do the quick weekly version
+        most weeks, and once a month sit down with a guide for a fuller review.
       </p>
 
-      {!active ? (
+      <div className="mt-5 inline-flex rounded-full border border-border p-1">
+        {([["weekly", "Weekly check-in"], ["monthly", "Monthly review"]] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setMode(key)}
+            className={`rounded-full px-4 py-1.5 text-sm transition-colors ${
+              mode === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-ink"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {mode === "monthly" ? (
+        <CoachSession userId={user.id} monthlyIncome={profile?.monthly_income ?? null} />
+      ) : !active ? (
         <div className="paper-card mt-6 p-6 text-center">
           <Button size="lg" onClick={() => setActive(true)}>Start this week's meeting</Button>
         </div>
