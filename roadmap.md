@@ -19,4 +19,7 @@
 - [ ] Clarify current balance versus forward-looking estimates
 - [ ] Validate the revised hierarchy on desktop and mobile
 - [ ] Keep a visible, compact debt-free goal link/graphic on Overview.
+- [ ] Confirm Overview presents one actual balance, one forecast, and one next action without duplicate cards.
+- [ ] Confirm sign-in loads without hydration errors.
+
 
