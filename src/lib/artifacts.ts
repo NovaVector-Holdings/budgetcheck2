@@ -217,8 +217,7 @@ export function checklistFromSchedule(p: PayoffPayload): ChecklistPayload {
     items: p.rows.map((r) => ({
       key: `row-${r.n}`,
       label: `Payment ${r.n} · ${formatDay(r.date)}`,
-      detail: `${money(r.minPerCycleSafe ?? 0)}`.replace("undefined", "") ||
-        `Balance after this payment: ${money(r.resultingBalance)}`,
+      detail: `Balance after this payment: ${money(r.resultingBalance)} · ${money(r.interest)} of it was interest`,
       amount: round2(p.minPerCycle + r.extraPayment),
     })),
   };
