@@ -96,12 +96,16 @@ function OverviewPage() {
         </p>
       )}
 
-      {/* Cash on hand feeds the two cards below it, so it comes first. */}
-      <div className="mt-8">
-        <CashOnHandEditor profile={data?.profile ?? null} userId={user.id} />
-      </div>
+      {/* Cash on hand feeds the two cards below it, so it comes first. Rendered only
+          once the profile has loaded, so the editor doesn't flash open for people
+          who already saved a balance. */}
+      {data && (
+        <div className="mt-8">
+          <CashOnHandEditor profile={data.profile} userId={user.id} />
+        </div>
+      )}
 
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
+      <div className="mt-4 grid items-start gap-4 md:grid-cols-2">
         <PaycheckPlanCard plan={plan} loading={!data} />
         <NextMoneyMoveCard plan={plan} loading={!data} />
       </div>
