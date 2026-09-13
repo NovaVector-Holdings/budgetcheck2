@@ -6,13 +6,13 @@ import { helpResources } from "@/lib/resources";
 export const Route = createFileRoute("/help")({
   head: () => ({
     meta: [
-      { title: "Local Help · Real assistance near you — IDEOU Money" },
+      { title: "Local Help · Real assistance near you — BudgetChek" },
       {
         name: "description",
         content:
           "211, Benefits.gov, LIHEAP, free tax prep, and nonprofit credit counseling — find help you qualify for in your area.",
       },
-      { property: "og:title", content: "Local Help · IDEOU Money" },
+      { property: "og:title", content: "Local Help · BudgetChek" },
       {
         property: "og:description",
         content: "Find local food, rent, utility, tax, and credit-counseling help.",

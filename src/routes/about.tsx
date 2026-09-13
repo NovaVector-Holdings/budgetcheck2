@@ -3,13 +3,13 @@ import { createFileRoute } from "@tanstack/react-router";
 export const Route = createFileRoute("/about")({
   head: () => ({
     meta: [
-      { title: "About the IDEOU team — IDEOU Money" },
+      { title: "About the BudgetChek team — BudgetChek" },
       {
         name: "description",
         content:
-          "How the IDEOU team builds financial-literacy content you can trust: sourcing rules, audio production, and our no-fabrication promise.",
+          "How the BudgetChek team builds financial-literacy content you can trust: sourcing rules, audio production, and our no-fabrication promise.",
       },
-      { property: "og:title", content: "About · IDEOU Money" },
+      { property: "og:title", content: "About · BudgetChek" },
       {
         property: "og:description",
         content:
@@ -44,10 +44,10 @@ function AboutPage() {
     <div className="mx-auto max-w-3xl px-6 py-16">
       <span className="eyebrow">About</span>
       <h1 className="heading-display mt-3 text-4xl text-ink sm:text-5xl">
-        Built by the IDEOU team — for people who are tired of money advice they can&rsquo;t verify.
+        Built by the BudgetChek team — for people who are tired of money advice they can&rsquo;t verify.
       </h1>
       <p className="mt-6 text-lg leading-relaxed text-muted-foreground">
-        IDEOU Money is a small cross-functional team of designers, educators,
+        BudgetChek is a small cross-functional team of designers, educators,
         and engineers building a financial-literacy feature that respects your
         time and your trust. The goal is acumen — the everyday judgment around
         money that most of us were never taught — without the noise of
