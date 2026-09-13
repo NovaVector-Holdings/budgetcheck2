@@ -11,7 +11,7 @@ import { toast } from "sonner";
 export const Route = createFileRoute("/_authenticated/debt")({
   head: () => ({
     meta: [
-      { title: "Debt strategy — BudgetChek" },
+      { title: "Debt payoff — BudgetChek" },
       { name: "description", content: "List your debts, pick a payoff order, and log payments as you go." },
       { property: "og:title", content: "Debt strategy — BudgetChek" },
       { property: "og:description", content: "List your debts, pick a payoff order, and log payments as you go." },
@@ -101,7 +101,7 @@ function DebtPage() {
     <div>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="eyebrow">Debt Strategy</p>
+          <p className="eyebrow">Debt</p>
           <h1 className="mt-2 font-serif text-3xl text-ink">
             {debts.length > 0 ? `${fmt(total)} across ${debts.length} debt${debts.length > 1 ? "s" : ""}` : "Your debt payoff plan"}
           </h1>

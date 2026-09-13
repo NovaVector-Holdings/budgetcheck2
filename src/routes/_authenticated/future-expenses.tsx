@@ -11,7 +11,7 @@ import { toast } from "sonner";
 export const Route = createFileRoute("/_authenticated/future-expenses")({
   head: () => ({
     meta: [
-      { title: "Future expenses — BudgetChek" },
+      { title: "Bills & expenses — BudgetChek" },
       { name: "description", content: "Plan upcoming bills and one-time costs before they surprise you." },
       { property: "og:title", content: "Future expenses — BudgetChek" },
       { property: "og:description", content: "Plan upcoming bills and one-time costs before they surprise you." },
@@ -111,7 +111,7 @@ function FutureExpensesPage() {
     <div>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="eyebrow">Future Expenses</p>
+          <p className="eyebrow">Bills & expenses</p>
           <h1 className="mt-2 font-serif text-3xl text-ink">Plan before it's due</h1>
           <p className="mt-2 max-w-xl text-sm text-muted-foreground">
             Bills, birthdays, car registration — put them here so they never ambush your month.

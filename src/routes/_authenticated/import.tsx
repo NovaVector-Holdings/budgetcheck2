@@ -11,7 +11,7 @@ import { toast } from "sonner";
 export const Route = createFileRoute("/_authenticated/import")({
   head: () => ({
     meta: [
-      { title: "Import & analyze — BudgetChek" },
+      { title: "Import spending — BudgetChek" },
       { name: "description", content: "Paste or upload a bank CSV and see where your money went, right in your browser." },
       { property: "og:title", content: "Import & analyze — BudgetChek" },
       { property: "og:description", content: "Paste or upload a bank CSV and see where your money went, right in your browser." },
@@ -108,7 +108,7 @@ function ImportPage() {
 
   return (
     <div>
-      <p className="eyebrow">Import & Analyze</p>
+      <p className="eyebrow">Import spending</p>
       <h1 className="mt-2 font-serif text-3xl text-ink">Turn a bank statement into insight</h1>
       <p className="mt-2 max-w-xl text-sm text-muted-foreground">
         Download a CSV from your bank (usually under "Statements" or "Export"), then upload or paste it here.
