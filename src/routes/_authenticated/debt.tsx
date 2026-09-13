@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { fmt, type Debt } from "@/lib/money";
+import { DebtFreeDate } from "@/components/debt-free-date";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -151,6 +152,12 @@ function DebtPage() {
               ? "Knock out the smallest balance first for quick wins that keep you going."
               : "Hit the highest interest rate first to pay the least overall."}
           </p>
+        </div>
+      )}
+
+      {debts.length > 0 && (
+        <div className="mt-6">
+          <DebtFreeDate debts={debts} method={method} />
         </div>
       )}
 
