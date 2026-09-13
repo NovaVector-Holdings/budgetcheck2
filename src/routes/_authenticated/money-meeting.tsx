@@ -16,7 +16,14 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { ArrowRight } from "lucide-react";
 
+const TAB_KEYS = ["weekly", "monthly", "ask", "plans", "statements", "data"] as const;
+
 export const Route = createFileRoute("/_authenticated/money-meeting")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    tab: TAB_KEYS.includes(search.tab as (typeof TAB_KEYS)[number])
+      ? (search.tab as (typeof TAB_KEYS)[number])
+      : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Money meeting — BudgetChek" },
