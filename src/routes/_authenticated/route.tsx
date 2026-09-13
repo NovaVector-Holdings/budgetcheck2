@@ -1,5 +1,6 @@
 import { createFileRoute, Outlet, redirect, useRouterState } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
+import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 // Five everyday tools stay in reach; the rest live behind "More" so the
@@ -53,6 +54,9 @@ export const Route = createFileRoute("/_authenticated")({
 function MemberLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const inMore = moreNav.some((m) => pathname.startsWith(m.to));
+  // null = follow the current page; true/false = the user opened or closed it.
+  const [manual, setManual] = useState<boolean | null>(null);
+  const showMore = manual ?? inMore;
 
   const pill =
     "whitespace-nowrap rounded-full border border-transparent px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-ink";
@@ -73,17 +77,20 @@ function MemberLayout() {
             {item.label}
           </Link>
         ))}
-        <Link
-          to={inMore ? pathname : "/settings"}
-          className={`${pill} ${inMore ? "bg-secondary text-ink" : ""}`}
-          aria-current={inMore ? "page" : undefined}
+        <button
+          type="button"
+          onClick={() => setManual(!showMore)}
+          className={`${pill} ${showMore ? "bg-secondary text-ink" : ""}`}
+          aria-expanded={showMore}
+          aria-controls="more-tools"
         >
           More
-        </Link>
+        </button>
       </nav>
 
-      {inMore && (
+      {showMore && (
         <nav
+          id="more-tools"
           aria-label="More tools"
           className="-mx-4 mb-8 flex gap-1 overflow-x-auto border-b border-border px-4 pb-3 sm:mx-0 sm:flex-wrap sm:px-0"
         >
@@ -99,7 +106,7 @@ function MemberLayout() {
           ))}
         </nav>
       )}
-      {!inMore && <div className="mb-8" />}
+      {!showMore && <div className="mb-8" />}
       <Outlet />
     </div>
   );
