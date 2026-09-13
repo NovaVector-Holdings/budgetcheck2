@@ -86,7 +86,7 @@ export function PaycheckPlanCard({ plan, loading }: { plan: PaycheckPlan; loadin
           </p>
 
           <div className="mt-4">
-            <Row label="On hand now" amount={plan.onHand} />
+            <Row label="Current balance" amount={plan.onHand} />
             <Row
               label={
                 plan.obligations.length > 0
@@ -99,7 +99,7 @@ export function PaycheckPlanCard({ plan, loading }: { plan: PaycheckPlan; loadin
             {shortfall ? (
               <Row label="Short by" amount={plan.safeToSpend} tone="bad" />
             ) : (
-              <Row label="Estimated available" amount={plan.safeToSpend} tone="good" />
+              <Row label="Safe to spend now" amount={plan.safeToSpend} tone="good" />
             )}
           </div>
 
@@ -208,7 +208,7 @@ export function CashOnHandEditor({ profile, userId }: { profile: Profile | null;
       <section className="paper-card p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Money on hand</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Current balance</p>
             <p className="mt-2 font-serif text-3xl text-ink">{fmt(profile?.cash_on_hand)}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               {profile?.balance_as_of ? `As of ${formatDay(profile.balance_as_of)}` : "Date not recorded"}

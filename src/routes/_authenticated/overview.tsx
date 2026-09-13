@@ -113,7 +113,7 @@ function OverviewPage() {
       {/* The one number people said matters most, with a plain explanation of what it is. */}
       <section className="paper-card mt-8 p-6 sm:p-8">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Estimated left this month
+          Projected month-end surplus
         </p>
         <p className="mt-2 font-serif text-4xl text-ink sm:text-5xl">
           {estimate != null ? fmt(estimate) : "Add your income"}
