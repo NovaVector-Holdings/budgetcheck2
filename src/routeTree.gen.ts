@@ -19,8 +19,11 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedSavingsRouteImport } from './routes/_authenticated/savings'
 import { Route as AuthenticatedOverviewRouteImport } from './routes/_authenticated/overview'
 import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authenticated/onboarding'
+import { Route as AuthenticatedFutureExpensesRouteImport } from './routes/_authenticated/future-expenses'
+import { Route as AuthenticatedDebtRouteImport } from './routes/_authenticated/debt'
 
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   id: '/sitemap.xml',
@@ -71,6 +74,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedSavingsRoute = AuthenticatedSavingsRouteImport.update({
+  id: '/savings',
+  path: '/savings',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedOverviewRoute = AuthenticatedOverviewRouteImport.update({
   id: '/overview',
   path: '/overview',
@@ -79,6 +87,17 @@ const AuthenticatedOverviewRoute = AuthenticatedOverviewRouteImport.update({
 const AuthenticatedOnboardingRoute = AuthenticatedOnboardingRouteImport.update({
   id: '/onboarding',
   path: '/onboarding',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedFutureExpensesRoute =
+  AuthenticatedFutureExpensesRouteImport.update({
+    id: '/future-expenses',
+    path: '/future-expenses',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedDebtRoute = AuthenticatedDebtRouteImport.update({
+  id: '/debt',
+  path: '/debt',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 
@@ -92,8 +111,11 @@ export interface FileRoutesByFullPath {
   '/read': typeof ReadRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/debt': typeof AuthenticatedDebtRoute
+  '/future-expenses': typeof AuthenticatedFutureExpensesRoute
   '/onboarding': typeof AuthenticatedOnboardingRoute
   '/overview': typeof AuthenticatedOverviewRoute
+  '/savings': typeof AuthenticatedSavingsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -105,8 +127,11 @@ export interface FileRoutesByTo {
   '/read': typeof ReadRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/debt': typeof AuthenticatedDebtRoute
+  '/future-expenses': typeof AuthenticatedFutureExpensesRoute
   '/onboarding': typeof AuthenticatedOnboardingRoute
   '/overview': typeof AuthenticatedOverviewRoute
+  '/savings': typeof AuthenticatedSavingsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -120,8 +145,11 @@ export interface FileRoutesById {
   '/read': typeof ReadRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/_authenticated/debt': typeof AuthenticatedDebtRoute
+  '/_authenticated/future-expenses': typeof AuthenticatedFutureExpensesRoute
   '/_authenticated/onboarding': typeof AuthenticatedOnboardingRoute
   '/_authenticated/overview': typeof AuthenticatedOverviewRoute
+  '/_authenticated/savings': typeof AuthenticatedSavingsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -135,8 +163,11 @@ export interface FileRouteTypes {
     | '/read'
     | '/reset-password'
     | '/sitemap.xml'
+    | '/debt'
+    | '/future-expenses'
     | '/onboarding'
     | '/overview'
+    | '/savings'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -148,8 +179,11 @@ export interface FileRouteTypes {
     | '/read'
     | '/reset-password'
     | '/sitemap.xml'
+    | '/debt'
+    | '/future-expenses'
     | '/onboarding'
     | '/overview'
+    | '/savings'
   id:
     | '__root__'
     | '/'
@@ -162,8 +196,11 @@ export interface FileRouteTypes {
     | '/read'
     | '/reset-password'
     | '/sitemap.xml'
+    | '/_authenticated/debt'
+    | '/_authenticated/future-expenses'
     | '/_authenticated/onboarding'
     | '/_authenticated/overview'
+    | '/_authenticated/savings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -251,6 +288,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/savings': {
+      id: '/_authenticated/savings'
+      path: '/savings'
+      fullPath: '/savings'
+      preLoaderRoute: typeof AuthenticatedSavingsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/overview': {
       id: '/_authenticated/overview'
       path: '/overview'
@@ -265,17 +309,37 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedOnboardingRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/future-expenses': {
+      id: '/_authenticated/future-expenses'
+      path: '/future-expenses'
+      fullPath: '/future-expenses'
+      preLoaderRoute: typeof AuthenticatedFutureExpensesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/debt': {
+      id: '/_authenticated/debt'
+      path: '/debt'
+      fullPath: '/debt'
+      preLoaderRoute: typeof AuthenticatedDebtRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedDebtRoute: typeof AuthenticatedDebtRoute
+  AuthenticatedFutureExpensesRoute: typeof AuthenticatedFutureExpensesRoute
   AuthenticatedOnboardingRoute: typeof AuthenticatedOnboardingRoute
   AuthenticatedOverviewRoute: typeof AuthenticatedOverviewRoute
+  AuthenticatedSavingsRoute: typeof AuthenticatedSavingsRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedDebtRoute: AuthenticatedDebtRoute,
+  AuthenticatedFutureExpensesRoute: AuthenticatedFutureExpensesRoute,
   AuthenticatedOnboardingRoute: AuthenticatedOnboardingRoute,
   AuthenticatedOverviewRoute: AuthenticatedOverviewRoute,
+  AuthenticatedSavingsRoute: AuthenticatedSavingsRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
