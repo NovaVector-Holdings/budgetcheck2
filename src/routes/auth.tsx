@@ -38,6 +38,21 @@ function AuthPage() {
 
   const safeRedirect = redirect && redirect.startsWith("/") ? redirect : "/overview";
 
+  async function handleDemo() {
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: "demo@budgetchek.app",
+        password: "BudgetChek-Demo-2026!",
+      });
+      if (error) throw error;
+      navigate({ to: "/overview" });
+    } catch {
+      toast.error("The demo account isn't available right now. Try creating a free account instead.");
+      setBusy(false);
+    }
+  }
+
   async function handleGoogle() {
     setBusy(true);
     try {
@@ -163,6 +178,12 @@ function AuthPage() {
             <Button type="button" variant="outline" className="w-full" onClick={handleGoogle} disabled={busy}>
               Continue with Google
             </Button>
+            <Button type="button" variant="secondary" className="mt-2 w-full" onClick={handleDemo} disabled={busy}>
+              Just looking? Explore the demo account
+            </Button>
+            <p className="mt-2 text-center text-xs text-muted-foreground">
+              A shared sample account pre-filled with example data — no sign-up needed.
+            </p>
           </>
         )}
 
