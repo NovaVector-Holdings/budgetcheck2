@@ -3,6 +3,8 @@
 // is shown to the user with every lesson so claims can be verified.
 // Do not add lessons whose facts cannot be traced to the linked source.
 
+type MoneyMeetingTab = "weekly" | "monthly" | "ask" | "plans" | "statements" | "data";
+
 export type Lesson = {
   id: string;
   title: string;
@@ -11,6 +13,9 @@ export type Lesson = {
   sourceUrl: string;
   takeaways: string[];
   script: string; // narrated text
+  /** Closes the Learn -> Apply loop: where in Money Meeting this lesson's
+   *  idea actually gets used, and why (shown as the CTA's own label). */
+  applyTo: { tab: MoneyMeetingTab; label: string };
 };
 
 export const lessons: Lesson[] = [
@@ -34,6 +39,7 @@ export const lessons: Lesson[] = [
       "If the number is negative, that is useful information, not a failure. It tells you the next decision is either to reduce fixed costs, raise income, or both. " +
       "Finally, revisit the plan at the end of every month. The first version of a budget is almost always wrong, and that is normal. The point is to keep adjusting until the plan matches your real life. " +
       "For the full toolkit, including printable worksheets, see the source link below.",
+    applyTo: { tab: "data", label: "Enter your own numbers" },
   },
   {
     id: "emergency-fund",
@@ -55,14 +61,14 @@ export const lessons: Lesson[] = [
       "Two practical habits help. First, keep the fund in a separate savings account, ideally one without a debit card attached, so you do not spend it by accident. Second, automate even a small transfer on payday — five, ten, or twenty dollars. Consistency matters more than the amount. " +
       "Once you have a starter fund, the common next goal is to build up to roughly three to six months of essential expenses, but only after higher-interest debt is under control. " +
       "The full Money Smart curriculum is free to download from the FDIC. The link is below.",
+    applyTo: { tab: "data", label: "Set aside your starter fund" },
   },
   {
     id: "credit-score",
     title: "What actually moves your credit score",
     minutes: 3,
     source: "Consumer Financial Protection Bureau · Credit reports & scores",
-    sourceUrl:
-      "https://www.consumerfinance.gov/consumer-tools/credit-reports-and-scores/",
+    sourceUrl: "https://www.consumerfinance.gov/consumer-tools/credit-reports-and-scores/",
     takeaways: [
       "Payment history and how much of your available credit you use matter the most.",
       "You are entitled to free weekly credit reports at AnnualCreditReport.com.",
@@ -76,14 +82,14 @@ export const lessons: Lesson[] = [
       "Second, errors on credit reports are common, and you have the right to dispute them. The CFPB provides free sample dispute letters on its site. " +
       "Improving a credit score is slow but predictable: pay on time, keep balances low relative to limits, and check your reports for mistakes. " +
       "See the source link for the full CFPB consumer guide.",
+    applyTo: { tab: "weekly", label: "Bring this to this week's check-in" },
   },
   {
     id: "investing-roadmap",
     title: "A beginner's investing roadmap",
     minutes: 4,
     source: "U.S. Securities and Exchange Commission · Investor.gov",
-    sourceUrl:
-      "https://www.investor.gov/sites/investorgov/files/2019-02/Saving-and-Investing.pdf",
+    sourceUrl: "https://www.investor.gov/sites/investorgov/files/2019-02/Saving-and-Investing.pdf",
     takeaways: [
       "Cover high-interest debt and an emergency fund before investing.",
       "Fees compound just like returns — small percentages matter a lot over time.",
@@ -98,6 +104,7 @@ export const lessons: Lesson[] = [
       "Third, diversification — owning many different investments instead of just one — reduces risk, but it does not eliminate it. All investing involves the possibility of loss. " +
       "The SEC also warns about one of the most common ways people lose money: investment fraud. If an offer promises guaranteed high returns with no risk, or pressures you to act immediately, it is almost certainly a scam. You can verify whether a person or firm is licensed at investor.gov. " +
       "The full SEC roadmap is linked below. It is free, and it is one of the clearest beginner guides written by a regulator.",
+    applyTo: { tab: "plans", label: "See your debt payoff plan first" },
   },
   {
     id: "spot-scams",
@@ -120,6 +127,7 @@ export const lessons: Lesson[] = [
       "No legitimate U.S. government agency, bank, or utility will ever demand payment in gift cards or crypto. If anyone does, it is a scam. " +
       "If you encounter a scam, or if you have been hit by one, you can report it to the FTC at reportfraud.ftc.gov. Reporting helps the FTC build cases and warn others, even if your own money cannot be recovered. " +
       "Full guidance is at the source link below.",
+    applyTo: { tab: "statements", label: "Review your last statement" },
   },
 ];
 

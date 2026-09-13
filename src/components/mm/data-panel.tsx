@@ -4,7 +4,13 @@ import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { readBalanceScreenshot } from "@/lib/mm-vision.functions";
 import { fmt, today } from "@/lib/money";
-import { ACCOUNT_KINDS, type MmAccount, type MmPatternRuleRow, type MmReservedFund, type MmSpendingCap } from "@/lib/mm";
+import {
+  ACCOUNT_KINDS,
+  type MmAccount,
+  type MmPatternRuleRow,
+  type MmReservedFund,
+  type MmSpendingCap,
+} from "@/lib/mm";
 import { checkCap, tapReserved, FUNDING_TIERS } from "@/lib/decision-engine";
 import { CLASS_META, type PatternClass } from "@/lib/pattern-rules";
 import { Button } from "@/components/ui/button";
@@ -13,6 +19,9 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Loader2, Trash2 } from "lucide-react";
 
+type RefKind = "expense" | "debt" | "goal" | "custom";
+type RefOption = { id: string; name: string };
+
 interface Props {
   userId: string;
   accounts: MmAccount[];
@@ -20,9 +29,27 @@ interface Props {
   caps: MmSpendingCap[];
   rules: MmPatternRuleRow[];
   overrides: { id: string; label: string; tier: number; reason: string | null }[];
+  expenses: RefOption[];
+  debts: RefOption[];
+  goals: RefOption[];
 }
 
-function Section({ title, blurb, children }: { title: string; blurb: string; children: React.ReactNode }) {
+const REF_KIND_LABEL: Record<RefKind, string> = {
+  expense: "A bill",
+  debt: "A debt",
+  goal: "A savings goal",
+  custom: "Something else",
+};
+
+function Section({
+  title,
+  blurb,
+  children,
+}: {
+  title: string;
+  blurb: string;
+  children: React.ReactNode;
+}) {
   return (
     <section className="paper-card p-6">
       <h3 className="font-serif text-lg text-ink">{title}</h3>
@@ -32,22 +59,46 @@ function Section({ title, blurb, children }: { title: string; blurb: string; chi
   );
 }
 
-export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }: Props) {
+export function DataPanel({
+  userId,
+  accounts,
+  reserved,
+  caps,
+  rules,
+  overrides,
+  expenses,
+  debts,
+  goals,
+}: Props) {
   const qc = useQueryClient();
   const readShot = useServerFn(readBalanceScreenshot);
   const shotRef = useRef<HTMLInputElement>(null);
 
   const [acct, setAcct] = useState({ name: "", kind: "checking", balance: "", limit: "" });
   const [res, setRes] = useState({ label: "", amount: "", purpose: "" });
-  const [cap, setCap] = useState({ category: "untracked_transfer", amount: "", instrument: "", limit: "" });
+  const [cap, setCap] = useState({
+    category: "untracked_transfer",
+    amount: "",
+    instrument: "",
+    limit: "",
+  });
   const [rule, setRule] = useState({ pattern: "", klass: "housing" as PatternClass });
+  const [override, setOverride] = useState({
+    refKind: "expense" as RefKind,
+    refId: "",
+    customLabel: "",
+    tier: "1",
+    reason: "",
+  });
 
-  const refresh = (...keys: string[]) => keys.forEach((k) => qc.invalidateQueries({ queryKey: [k, userId] }));
+  const refresh = (...keys: string[]) =>
+    keys.forEach((k) => qc.invalidateQueries({ queryKey: [k, userId] }));
 
   const addAccount = useMutation({
     mutationFn: async () => {
       const balance = Number(acct.balance);
-      if (!acct.name.trim() || !Number.isFinite(balance)) throw new Error("Needs a name and a balance");
+      if (!acct.name.trim() || !Number.isFinite(balance))
+        throw new Error("Needs a name and a balance");
       const { error } = await supabase.from("mm_accounts").insert({
         user_id: userId,
         name: acct.name.trim(),
@@ -63,7 +114,12 @@ export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }
       refresh("mm_accounts");
       toast.success("Account added.");
     },
-    onError: (e: Error) => toast.error(e.message === "Needs a name and a balance" ? "Give it a name and a balance." : "Couldn't add that."),
+    onError: (e: Error) =>
+      toast.error(
+        e.message === "Needs a name and a balance"
+          ? "Give it a name and a balance."
+          : "Couldn't add that.",
+      ),
   });
 
   const addReserved = useMutation({
@@ -89,10 +145,19 @@ export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }
   const tap = useMutation({
     mutationFn: async ({ fund, amount }: { fund: MmReservedFund; amount: number }) => {
       const next = tapReserved(
-        { id: fund.id, label: fund.label, amount: Number(fund.amount), purpose: fund.purpose ?? "", tapped: Number(fund.tapped_amount) },
+        {
+          id: fund.id,
+          label: fund.label,
+          amount: Number(fund.amount),
+          purpose: fund.purpose ?? "",
+          tapped: Number(fund.tapped_amount),
+        },
         amount,
       );
-      const { error } = await supabase.from("mm_reserved_funds").update({ tapped_amount: next.fund.tapped }).eq("id", fund.id);
+      const { error } = await supabase
+        .from("mm_reserved_funds")
+        .update({ tapped_amount: next.fund.tapped })
+        .eq("id", fund.id);
       if (error) throw error;
       return next.rebuild;
     },
@@ -146,6 +211,47 @@ export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }
     onError: () => toast.error("Type the words to look for."),
   });
 
+  const overrideSource: Record<Exclude<RefKind, "custom">, RefOption[]> = {
+    expense: expenses,
+    debt: debts,
+    goal: goals,
+  };
+
+  const addOverride = useMutation({
+    mutationFn: async () => {
+      const tier = Number(override.tier);
+      if (!Number.isFinite(tier) || tier < 1 || tier > FUNDING_TIERS.length)
+        throw new Error("bad-tier");
+
+      let refId = override.refId;
+      let label = override.customLabel.trim();
+      if (override.refKind === "custom") {
+        if (!label) throw new Error("bad-label");
+        refId = crypto.randomUUID();
+      } else {
+        if (!refId) throw new Error("bad-ref");
+        label = overrideSource[override.refKind].find((item) => item.id === refId)?.name ?? "";
+        if (!label) throw new Error("bad-label");
+      }
+
+      const { error } = await supabase.from("mm_priority_overrides").insert({
+        user_id: userId,
+        ref_kind: override.refKind,
+        ref_id: refId,
+        label,
+        tier,
+        reason: override.reason.trim() || null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setOverride({ refKind: "expense", refId: "", customLabel: "", tier: "1", reason: "" });
+      refresh("mm_overrides");
+      toast.success("Priority saved. It moves up the order whenever money is short.");
+    },
+    onError: () => toast.error("Pick what this is about (or name it yourself) and a tier."),
+  });
+
   const remove = useMutation({
     mutationFn: async ({ table, id }: { table: string; id: string }) => {
       const { error } = await (supabase as any).from(table).delete().eq("id", id);
@@ -197,7 +303,10 @@ export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }
         {accounts.length > 0 && (
           <ul className="mt-4 divide-y divide-border rounded-lg border border-border">
             {accounts.map((a) => (
-              <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <li
+                key={a.id}
+                className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
+              >
                 <div className="min-w-0">
                   <p className="text-sm text-ink">{a.name}</p>
                   <p className="text-xs text-muted-foreground">
@@ -207,8 +316,15 @@ export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="text-sm font-medium text-ink">{fmt(Number(a.current_balance))}</span>
-                  <Button size="icon" variant="ghost" aria-label={`Remove ${a.name}`} onClick={() => remove.mutate({ table: "mm_accounts", id: a.id })}>
+                  <span className="text-sm font-medium text-ink">
+                    {fmt(Number(a.current_balance))}
+                  </span>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label={`Remove ${a.name}`}
+                    onClick={() => remove.mutate({ table: "mm_accounts", id: a.id })}
+                  >
                     <Trash2 className="h-4 w-4" aria-hidden />
                   </Button>
                 </div>
@@ -217,13 +333,19 @@ export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }
           </ul>
         )}
         <p className="mt-3 text-sm text-muted-foreground">
-          Spendable across {spendable.length} account{spendable.length === 1 ? "" : "s"}: <span className="font-medium text-ink">{fmt(spendableTotal)}</span>
+          Spendable across {spendable.length} account{spendable.length === 1 ? "" : "s"}:{" "}
+          <span className="font-medium text-ink">{fmt(spendableTotal)}</span>
         </p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-4">
           <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="acct-name">Account name</Label>
-            <Input id="acct-name" value={acct.name} onChange={(e) => setAcct({ ...acct, name: e.target.value })} placeholder="Everyday checking" />
+            <Input
+              id="acct-name"
+              value={acct.name}
+              onChange={(e) => setAcct({ ...acct, name: e.target.value })}
+              placeholder="Everyday checking"
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="acct-kind">Type</Label>
@@ -233,35 +355,62 @@ export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }
               value={acct.kind}
               onChange={(e) => setAcct({ ...acct, kind: e.target.value })}
             >
-              {ACCOUNT_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+              {ACCOUNT_KINDS.map((k) => (
+                <option key={k.value} value={k.value}>
+                  {k.label}
+                </option>
+              ))}
             </select>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="acct-bal">Balance today</Label>
-            <Input id="acct-bal" inputMode="decimal" value={acct.balance} onChange={(e) => setAcct({ ...acct, balance: e.target.value })} placeholder="0.00" />
+            <Input
+              id="acct-bal"
+              inputMode="decimal"
+              value={acct.balance}
+              onChange={(e) => setAcct({ ...acct, balance: e.target.value })}
+              placeholder="0.00"
+            />
           </div>
           {acct.kind === "credit" && (
             <div className="space-y-1.5">
               <Label htmlFor="acct-limit">Card limit</Label>
-              <Input id="acct-limit" inputMode="decimal" value={acct.limit} onChange={(e) => setAcct({ ...acct, limit: e.target.value })} placeholder="0.00" />
+              <Input
+                id="acct-limit"
+                inputMode="decimal"
+                value={acct.limit}
+                onChange={(e) => setAcct({ ...acct, limit: e.target.value })}
+                placeholder="0.00"
+              />
             </div>
           )}
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button size="sm" onClick={() => addAccount.mutate()} disabled={addAccount.isPending}>Add account</Button>
+          <Button size="sm" onClick={() => addAccount.mutate()} disabled={addAccount.isPending}>
+            Add account
+          </Button>
           <input
             ref={shotRef}
             type="file"
             accept="image/*"
             className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) scan.mutate(f); }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) scan.mutate(f);
+            }}
           />
-          <Button size="sm" variant="outline" onClick={() => shotRef.current?.click()} disabled={scan.isPending}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => shotRef.current?.click()}
+            disabled={scan.isPending}
+          >
             {scan.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />}
             Fill from a screenshot
           </Button>
           <span className="text-xs text-muted-foreground">
-            A screenshot of your balance screen fills the fields in. Anything unreadable is left blank rather than guessed.
+            A screenshot of your balance screen fills the fields in. Anything unreadable is left
+            blank rather than guessed.
           </span>
         </div>
       </Section>
@@ -283,7 +432,8 @@ export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }
                   {r.purpose && <p className="mt-1 text-xs text-muted-foreground">{r.purpose}</p>}
                   {Number(r.tapped_amount) > 0 && (
                     <p className="mt-1 text-xs text-ink">
-                      {fmt(Number(r.tapped_amount))} is out and owed back — first in line next payday.
+                      {fmt(Number(r.tapped_amount))} is out and owed back — first in line next
+                      payday.
                     </p>
                   )}
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -298,7 +448,13 @@ export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }
                     >
                       Use some of this
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => remove.mutate({ table: "mm_reserved_funds", id: r.id })}>Remove</Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => remove.mutate({ table: "mm_reserved_funds", id: r.id })}
+                    >
+                      Remove
+                    </Button>
                   </div>
                 </li>
               );
@@ -308,18 +464,41 @@ export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <div className="space-y-1.5">
             <Label htmlFor="res-label">What is it</Label>
-            <Input id="res-label" value={res.label} onChange={(e) => setRes({ ...res, label: e.target.value })} placeholder="Tax cushion" />
+            <Input
+              id="res-label"
+              value={res.label}
+              onChange={(e) => setRes({ ...res, label: e.target.value })}
+              placeholder="Tax cushion"
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="res-amount">Amount</Label>
-            <Input id="res-amount" inputMode="decimal" value={res.amount} onChange={(e) => setRes({ ...res, amount: e.target.value })} placeholder="0.00" />
+            <Input
+              id="res-amount"
+              inputMode="decimal"
+              value={res.amount}
+              onChange={(e) => setRes({ ...res, amount: e.target.value })}
+              placeholder="0.00"
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="res-purpose">What it's for</Label>
-            <Input id="res-purpose" value={res.purpose} onChange={(e) => setRes({ ...res, purpose: e.target.value })} placeholder="April tax bill" />
+            <Input
+              id="res-purpose"
+              value={res.purpose}
+              onChange={(e) => setRes({ ...res, purpose: e.target.value })}
+              placeholder="April tax bill"
+            />
           </div>
         </div>
-        <Button className="mt-3" size="sm" onClick={() => addReserved.mutate()} disabled={addReserved.isPending}>Set aside</Button>
+        <Button
+          className="mt-3"
+          size="sm"
+          onClick={() => addReserved.mutate()}
+          disabled={addReserved.isPending}
+        >
+          Set aside
+        </Button>
       </Section>
 
       <Section
@@ -338,13 +517,27 @@ export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }
                 instrumentLimit: c.instrument_limit == null ? null : Number(c.instrument_limit),
               });
               return (
-                <li key={c.id} className={`rounded-lg border p-4 ${check.structuralGap ? "border-primary/50 bg-primary/5" : "border-border"}`}>
+                <li
+                  key={c.id}
+                  className={`rounded-lg border p-4 ${check.structuralGap ? "border-primary/50 bg-primary/5" : "border-border"}`}
+                >
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <p className="text-sm text-ink">{CLASS_META[c.category as PatternClass]?.label ?? c.category}</p>
-                    <p className="text-sm font-medium text-ink">{fmt(Number(c.cap_amount))} / month</p>
+                    <p className="text-sm text-ink">
+                      {CLASS_META[c.category as PatternClass]?.label ?? c.category}
+                    </p>
+                    <p className="text-sm font-medium text-ink">
+                      {fmt(Number(c.cap_amount))} / month
+                    </p>
                   </div>
                   <p className="mt-1 text-xs text-ink">{check.sentence}</p>
-                  <Button className="mt-2" size="sm" variant="ghost" onClick={() => remove.mutate({ table: "mm_spending_caps", id: c.id })}>Remove</Button>
+                  <Button
+                    className="mt-2"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => remove.mutate({ table: "mm_spending_caps", id: c.id })}
+                  >
+                    Remove
+                  </Button>
                 </li>
               );
             })}
@@ -361,23 +554,51 @@ export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }
             >
               {(Object.keys(CLASS_META) as PatternClass[])
                 .filter((k) => CLASS_META[k].leaky)
-                .map((k) => <option key={k} value={k}>{CLASS_META[k].label}</option>)}
+                .map((k) => (
+                  <option key={k} value={k}>
+                    {CLASS_META[k].label}
+                  </option>
+                ))}
             </select>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="cap-amt">Your ceiling</Label>
-            <Input id="cap-amt" inputMode="decimal" value={cap.amount} onChange={(e) => setCap({ ...cap, amount: e.target.value })} placeholder="150" />
+            <Input
+              id="cap-amt"
+              inputMode="decimal"
+              value={cap.amount}
+              onChange={(e) => setCap({ ...cap, amount: e.target.value })}
+              placeholder="150"
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="cap-inst">Card behind it</Label>
-            <Input id="cap-inst" value={cap.instrument} onChange={(e) => setCap({ ...cap, instrument: e.target.value })} placeholder="Optional" />
+            <Input
+              id="cap-inst"
+              value={cap.instrument}
+              onChange={(e) => setCap({ ...cap, instrument: e.target.value })}
+              placeholder="Optional"
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="cap-lim">That card's limit</Label>
-            <Input id="cap-lim" inputMode="decimal" value={cap.limit} onChange={(e) => setCap({ ...cap, limit: e.target.value })} placeholder="Optional" />
+            <Input
+              id="cap-lim"
+              inputMode="decimal"
+              value={cap.limit}
+              onChange={(e) => setCap({ ...cap, limit: e.target.value })}
+              placeholder="Optional"
+            />
           </div>
         </div>
-        <Button className="mt-3" size="sm" onClick={() => addCap.mutate()} disabled={addCap.isPending}>Save cap</Button>
+        <Button
+          className="mt-3"
+          size="sm"
+          onClick={() => addCap.mutate()}
+          disabled={addCap.isPending}
+        >
+          Save cap
+        </Button>
       </Section>
 
       <Section
@@ -387,11 +608,20 @@ export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }
         {rules.length > 0 && (
           <ul className="mt-4 space-y-2">
             {rules.map((r) => (
-              <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3">
+              <li
+                key={r.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
+              >
                 <p className="text-sm text-ink">
-                  “{r.pattern}” means {CLASS_META[r.classify_as as PatternClass]?.label ?? r.classify_as}
+                  “{r.pattern}” means{" "}
+                  {CLASS_META[r.classify_as as PatternClass]?.label ?? r.classify_as}
                 </p>
-                <Button size="icon" variant="ghost" aria-label="Remove rule" onClick={() => remove.mutate({ table: "mm_pattern_rules", id: r.id })}>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label="Remove rule"
+                  onClick={() => remove.mutate({ table: "mm_pattern_rules", id: r.id })}
+                >
                   <Trash2 className="h-4 w-4" aria-hidden />
                 </Button>
               </li>
@@ -401,7 +631,12 @@ export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="rule-pattern">Words to look for</Label>
-            <Input id="rule-pattern" value={rule.pattern} onChange={(e) => setRule({ ...rule, pattern: e.target.value })} placeholder="e.g. the shop name on your rent payment" />
+            <Input
+              id="rule-pattern"
+              value={rule.pattern}
+              onChange={(e) => setRule({ ...rule, pattern: e.target.value })}
+              placeholder="e.g. the shop name on your rent payment"
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="rule-class">Treat it as</Label>
@@ -411,30 +646,148 @@ export function DataPanel({ userId, accounts, reserved, caps, rules, overrides }
               value={rule.klass}
               onChange={(e) => setRule({ ...rule, klass: e.target.value as PatternClass })}
             >
-              {(Object.keys(CLASS_META) as PatternClass[]).map((k) => <option key={k} value={k}>{CLASS_META[k].label}</option>)}
+              {(Object.keys(CLASS_META) as PatternClass[]).map((k) => (
+                <option key={k} value={k}>
+                  {CLASS_META[k].label}
+                </option>
+              ))}
             </select>
           </div>
         </div>
-        <Button className="mt-3" size="sm" onClick={() => addRule.mutate()} disabled={addRule.isPending}>Add rule</Button>
+        <Button
+          className="mt-3"
+          size="sm"
+          onClick={() => addRule.mutate()}
+          disabled={addRule.isPending}
+        >
+          Add rule
+        </Button>
       </Section>
 
-      {overrides.length > 0 && (
-        <Section title="What you said matters most" blurb="These move an item up the order when money is short, and the reason you gave is shown wherever the order appears.">
+      <Section
+        title="What you said matters most"
+        blurb="Move a bill, debt, or goal up the funding order by hand, and say why — that reason is shown wherever the order appears, including to the assistant."
+      >
+        {overrides.length > 0 && (
           <ul className="mt-4 space-y-2">
             {overrides.map((o) => (
-              <li key={o.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3">
+              <li
+                key={o.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-4 py-3"
+              >
                 <div className="min-w-0">
                   <p className="text-sm text-ink">{o.label}</p>
                   <p className="text-xs text-muted-foreground">
-                    Moved to {FUNDING_TIERS[o.tier - 1]?.label}{o.reason ? ` — ${o.reason}` : ""}
+                    Moved to {FUNDING_TIERS[o.tier - 1]?.label}
+                    {o.reason ? ` — ${o.reason}` : ""}
                   </p>
                 </div>
-                <Button size="sm" variant="ghost" onClick={() => remove.mutate({ table: "mm_priority_overrides", id: o.id })}>Remove</Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => remove.mutate({ table: "mm_priority_overrides", id: o.id })}
+                >
+                  Remove
+                </Button>
               </li>
             ))}
           </ul>
-        </Section>
-      )}
+        )}
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="ov-kind">What is this about</Label>
+            <select
+              id="ov-kind"
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={override.refKind}
+              onChange={(e) =>
+                setOverride({
+                  ...override,
+                  refKind: e.target.value as RefKind,
+                  refId: "",
+                  customLabel: "",
+                })
+              }
+            >
+              {(Object.keys(REF_KIND_LABEL) as RefKind[]).map((k) => (
+                <option key={k} value={k}>
+                  {REF_KIND_LABEL[k]}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {override.refKind === "custom" ? (
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="ov-label">Name it</Label>
+              <Input
+                id="ov-label"
+                value={override.customLabel}
+                onChange={(e) => setOverride({ ...override, customLabel: e.target.value })}
+                placeholder="e.g. My sister's rent I'm covering this month"
+              />
+            </div>
+          ) : (
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="ov-ref">Which one</Label>
+              <select
+                id="ov-ref"
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={override.refId}
+                onChange={(e) => setOverride({ ...override, refId: e.target.value })}
+              >
+                <option value="">Choose one…</option>
+                {overrideSource[override.refKind].map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+              {overrideSource[override.refKind].length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  You don't have any of these yet — add one first, or choose "Something else" to
+                  name it directly.
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="ov-tier">Move to</Label>
+            <select
+              id="ov-tier"
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={override.tier}
+              onChange={(e) => setOverride({ ...override, tier: e.target.value })}
+            >
+              {FUNDING_TIERS.map((t) => (
+                <option key={t.tier} value={t.tier}>
+                  {t.tier}. {t.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1.5 sm:col-span-4">
+            <Label htmlFor="ov-reason">Why (optional, but shown wherever this appears)</Label>
+            <Input
+              id="ov-reason"
+              value={override.reason}
+              onChange={(e) => setOverride({ ...override, reason: e.target.value })}
+              placeholder="e.g. Landlord charges a $75 late fee after the 3rd"
+            />
+          </div>
+        </div>
+        <Button
+          className="mt-3"
+          size="sm"
+          onClick={() => addOverride.mutate()}
+          disabled={addOverride.isPending}
+        >
+          Save priority
+        </Button>
+      </Section>
     </div>
   );
 }

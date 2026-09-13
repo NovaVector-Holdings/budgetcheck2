@@ -37,6 +37,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-solid: var(--destructive-solid);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -47,6 +48,7 @@
 
 :root {
   --radius: 0.75rem;
+  color-scheme: light;
 
   /* Warm trust palette: cream paper, deep evergreen, brass accent */
   --background: oklch(0.97 0.015 85);
@@ -75,10 +77,65 @@
 
   --destructive: oklch(0.55 0.18 25);
   --destructive-foreground: oklch(0.98 0.005 85);
+  /* Same value as --destructive: a mid-lightness red already reads fine as
+     both page text (on the near-white page) and as a solid button surface
+     under --destructive-foreground here. Dark mode needs these to diverge
+     -- see the .dark block. */
+  --destructive-solid: oklch(0.55 0.18 25);
 
   --border: oklch(0.88 0.02 85);
   --input: oklch(0.88 0.02 85);
   --ring: oklch(0.45 0.07 165);
+}
+
+.dark {
+  color-scheme: dark;
+
+  /* Same warm-trust identity (cream/evergreen/gold hues preserved), remapped
+     to a dark elevation ladder: background < card < popover, each a step
+     lighter than the last so surfaces read as "above" the page. */
+  --background: oklch(0.16 0.018 160);
+  --foreground: oklch(0.92 0.015 85);
+  --ink: oklch(0.96 0.01 85);
+
+  --card: oklch(0.2 0.02 160);
+  --card-foreground: oklch(0.92 0.015 85);
+  --popover: oklch(0.23 0.02 160);
+  --popover-foreground: oklch(0.92 0.015 85);
+
+  --primary: oklch(0.7 0.09 165);
+  --primary-foreground: oklch(0.14 0.02 165);
+
+  --secondary: oklch(0.26 0.025 85);
+  --secondary-foreground: oklch(0.9 0.015 85);
+
+  --muted: oklch(0.24 0.02 85);
+  --muted-foreground: oklch(0.66 0.02 85);
+
+  --accent: oklch(0.28 0.035 75);
+  --accent-foreground: oklch(0.9 0.015 85);
+
+  --gold: oklch(0.78 0.11 75);
+  --gold-foreground: oklch(0.2 0.03 80);
+
+  /* --destructive: tuned to read as body/badge TEXT directly on the very
+     dark page (>=4.5:1 against --background/--card). --destructive-solid:
+     a separate, darker red tuned for use as a SOLID surface under
+     --destructive-foreground (a near-white). One red can't hit 4.5:1 in
+     both roles at once against a near-black page -- white text needs a
+     background luminance no white text on earth can clear if the surface
+     itself is already bright enough to read well on that page. Two tokens,
+     not a compromise value that quietly fails one of the two real uses
+     (badge text at src/components/paycheck-cards.tsx's RiskBadge /
+     PaycheckPlanCard's "Short by" row, and the solid delete button at
+     src/routes/_authenticated/settings.tsx). */
+  --destructive: oklch(0.62 0.19 25);
+  --destructive-foreground: oklch(0.97 0.01 85);
+  --destructive-solid: oklch(0.4 0.17 25);
+
+  --border: oklch(0.32 0.02 160);
+  --input: oklch(0.32 0.02 160);
+  --ring: oklch(0.7 0.09 165);
 }
 
 @layer base {
@@ -121,4 +178,8 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   box-shadow: 0 1px 0 oklch(0.85 0.02 85 / 0.6), 0 12px 24px -18px oklch(0.3 0.03 160 / 0.35);
+
+  .dark & {
+    box-shadow: 0 1px 0 oklch(0.32 0.02 160 / 0.5), 0 12px 24px -18px oklch(0.03 0.01 160 / 0.7);
+  }
 }

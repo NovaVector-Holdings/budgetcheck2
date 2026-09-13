@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { SiteHeader, SiteFooter } from "../components/site-header";
+import { ThemeProvider, THEME_INIT_SCRIPT } from "../lib/theme";
 
 function NotFoundComponent() {
   return (
@@ -100,8 +101,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    // suppressHydrationWarning: the server can't know the stored/system theme
+    // ahead of time, so THEME_INIT_SCRIPT deliberately sets `className="dark"`
+    // on the client before hydration -- expected server/client divergence on
+    // this one attribute, not a real bug.
+    <html lang="en" suppressHydrationWarning>
       <head>
+        {/* Must run before first paint to avoid a flash of the wrong theme. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <HeadContent />
       </head>
       <body>
@@ -116,15 +123,17 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <div className="flex min-h-screen flex-col">
-        <SiteHeader />
-        <main className="flex-1">
-          {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-          <Outlet />
-        </main>
-        <SiteFooter />
-      </div>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <div className="flex min-h-screen flex-col">
+          <SiteHeader />
+          <main className="flex-1">
+            {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+            <Outlet />
+          </main>
+          <SiteFooter />
+        </div>
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }
