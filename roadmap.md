@@ -12,3 +12,9 @@
 - [x] Rebuild /money-meeting around the new tabs
 - [x] Per-mode headings and captions (weekly vs monthly vs assistant) — not one shared title
 - [x] No paywall: every part of Money Meeting is free
+
+## Overview simplification
+- [ ] Audit every Overview card against consumer-finance dashboard principles
+- [ ] Remove, consolidate, or relocate low-value and duplicate information
+- [ ] Clarify current balance versus forward-looking estimates
+- [ ] Validate the revised hierarchy on desktop and mobile
