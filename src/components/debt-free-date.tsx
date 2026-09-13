@@ -56,7 +56,8 @@ export function DebtFreeDate({
 
   const base = useMemo(() => buildPayoffPlan(debts, method, 0), [debts, method]);
   const boosted = useMemo(() => buildPayoffPlan(debts, method, extraNum), [debts, method, extraNum]);
-  const plan = extraNum > 0 ? boosted : base;
+  // The headline date always reflects your current payments; the extra box shows what changes.
+  const plan = base;
   const saved = base.possible && boosted.possible ? base.months - boosted.months : 0;
   const interestSaved = base.possible && boosted.possible ? base.totalInterest - boosted.totalInterest : 0;
 
