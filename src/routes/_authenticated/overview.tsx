@@ -2,6 +2,10 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { DebtFreeDate } from "@/components/debt-free-date";
+import { CashOnHandEditor, NextMoneyMoveCard, PaycheckPlanCard } from "@/components/paycheck-cards";
+import { BudgetMethodView } from "@/components/budget-method-view";
+import { buildPaycheckPlan } from "@/lib/paycheck";
+import type { BudgetMethod } from "@/lib/budget-methods";
 import { fmt, today, type Debt, type PlannedExpense, type Profile, type SavingsDeposit, type SavingsGoal } from "@/lib/money";
 
 export const Route = createFileRoute("/_authenticated/overview")({
