@@ -1,13 +1,14 @@
 # Simplify the My Money Overview
 
 ## Team assessment
-The Overview has grown to roughly ten separate cards. Several repeat another card’s answer or belong on a deeper page. The first screen should answer three questions only: **What do I have now? Am I covered until payday? What should I do next?**
+The Overview had grown to nine separate content blocks. Several repeat another card’s answer or belong on a deeper page. The first screen should answer three questions only: **What do I have now? Am I covered until payday? What should I do next?**
 
 ## Keep and strengthen
 - Keep **Am I okay until my next paycheck?** as the main forecast.
 - Keep **Your next money move** as the single recommended action.
 - Rename **Money on hand** to **Current available balance** and visually integrate it with the payday forecast as its starting number.
 - Keep a compact **Your progress** summary linking to Savings and Debt, without separate oversized cards.
+- Keep a **small debt-free-date visual** on Overview so the main money goal stays in sight.
 - Show setup completeness only when information is missing, as a compact prompt rather than another permanent card.
 
 ## Remove from Overview
@@ -17,13 +18,13 @@ The Overview has grown to roughly ten separate cards. Several repeat another car
 
 ## Move to more appropriate pages
 - Keep the full **budget method** breakdown in Reports, where users expect analysis rather than immediate action.
-- Keep the full **debt-free date** projection on Debt; Overview will link to it through the compact debt summary.
+- Keep the full **debt-free date** projection on Debt; Overview will show a small goal graphic only.
 
 ## Resulting hierarchy
 1. Greeting and current focus
 2. Current available balance + payday forecast
 3. Your next money move
-4. Compact savings/debt progress links
+4. Compact savings/debt progress links (with debt-free-date mini goal)
 
 ## Technical notes
 - Preserve all existing calculations and stored data except the misleading monthly estimate display.
@@ -33,5 +34,6 @@ The Overview has grown to roughly ten separate cards. Several repeat another car
 ## Validation
 - Check complete-data and missing-data states.
 - Verify desktop and mobile layouts.
-- Confirm Overview presents one actual balance, one forecast, and one next action without duplicate cards.
+- Confirm Overview presents one actual balance, one forecast, and one next action without duplicate cards, while still showing the debt-free goal.
 - Confirm sign-in loads without hydration errors.
+
