@@ -14,7 +14,319 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      alert_settings: {
+        Row: {
+          expense_reminder_days: number
+          low_funds_threshold: number | null
+          updated_at: string
+          user_id: string
+          weekly_summary: boolean
+        }
+        Insert: {
+          expense_reminder_days?: number
+          low_funds_threshold?: number | null
+          updated_at?: string
+          user_id: string
+          weekly_summary?: boolean
+        }
+        Update: {
+          expense_reminder_days?: number
+          low_funds_threshold?: number | null
+          updated_at?: string
+          user_id?: string
+          weekly_summary?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alert_settings_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      debt_payments: {
+        Row: {
+          amount: number
+          created_at: string
+          debt_id: string
+          id: string
+          paid_on: string
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          debt_id: string
+          id?: string
+          paid_on?: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          debt_id?: string
+          id?: string
+          paid_on?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "debt_payments_debt_id_fkey"
+            columns: ["debt_id"]
+            isOneToOne: false
+            referencedRelation: "debts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "debt_payments_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      debts: {
+        Row: {
+          apr: number | null
+          archived: boolean
+          balance: number
+          created_at: string
+          id: string
+          minimum_payment: number | null
+          name: string
+          user_id: string
+        }
+        Insert: {
+          apr?: number | null
+          archived?: boolean
+          balance: number
+          created_at?: string
+          id?: string
+          minimum_payment?: number | null
+          name: string
+          user_id: string
+        }
+        Update: {
+          apr?: number | null
+          archived?: boolean
+          balance?: number
+          created_at?: string
+          id?: string
+          minimum_payment?: number | null
+          name?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "debts_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      money_meetings: {
+        Row: {
+          archived: boolean
+          checklist: Json
+          created_at: string
+          held_on: string
+          id: string
+          notes: string | null
+          user_id: string
+        }
+        Insert: {
+          archived?: boolean
+          checklist?: Json
+          created_at?: string
+          held_on?: string
+          id?: string
+          notes?: string | null
+          user_id: string
+        }
+        Update: {
+          archived?: boolean
+          checklist?: Json
+          created_at?: string
+          held_on?: string
+          id?: string
+          notes?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "money_meetings_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      planned_expenses: {
+        Row: {
+          amount: number
+          archived: boolean
+          category: string
+          created_at: string
+          due_date: string
+          id: string
+          name: string
+          paid: boolean
+          recurring: string
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          archived?: boolean
+          category?: string
+          created_at?: string
+          due_date: string
+          id?: string
+          name: string
+          paid?: boolean
+          recurring?: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          archived?: boolean
+          category?: string
+          created_at?: string
+          due_date?: string
+          id?: string
+          name?: string
+          paid?: boolean
+          recurring?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "planned_expenses_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          id: string
+          money_goal: string | null
+          monthly_income: number | null
+          onboarding_completed: boolean
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          id: string
+          money_goal?: string | null
+          monthly_income?: number | null
+          onboarding_completed?: boolean
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          money_goal?: string | null
+          monthly_income?: number | null
+          onboarding_completed?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      savings_deposits: {
+        Row: {
+          amount: number
+          created_at: string
+          deposited_on: string
+          goal_id: string
+          id: string
+          note: string | null
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          deposited_on?: string
+          goal_id: string
+          id?: string
+          note?: string | null
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          deposited_on?: string
+          goal_id?: string
+          id?: string
+          note?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "savings_deposits_goal_id_fkey"
+            columns: ["goal_id"]
+            isOneToOne: false
+            referencedRelation: "savings_goals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "savings_deposits_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      savings_goals: {
+        Row: {
+          archived: boolean
+          created_at: string
+          id: string
+          name: string
+          target_amount: number
+          target_date: string | null
+          user_id: string
+        }
+        Insert: {
+          archived?: boolean
+          created_at?: string
+          id?: string
+          name: string
+          target_amount: number
+          target_date?: string | null
+          user_id: string
+        }
+        Update: {
+          archived?: boolean
+          created_at?: string
+          id?: string
+          name?: string
+          target_amount?: number
+          target_date?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "savings_goals_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
