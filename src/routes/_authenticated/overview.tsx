@@ -2,6 +2,10 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { DebtFreeDate } from "@/components/debt-free-date";
+import { CashOnHandEditor, NextMoneyMoveCard, PaycheckPlanCard } from "@/components/paycheck-cards";
+import { BudgetMethodView } from "@/components/budget-method-view";
+import { buildPaycheckPlan } from "@/lib/paycheck";
+import type { BudgetMethod } from "@/lib/budget-methods";
 import { fmt, today, type Debt, type PlannedExpense, type Profile, type SavingsDeposit, type SavingsGoal } from "@/lib/money";
 
 export const Route = createFileRoute("/_authenticated/overview")({
@@ -66,6 +70,20 @@ function OverviewPage() {
   const doneChecks = checks.filter((c) => c.done).length;
   const nextStep = checks.find((c) => !c.done);
 
+  // Paycheck-cycle plan. Refuses to produce a number when an input is missing.
+  const plan = buildPaycheckPlan({
+    profile: data?.profile ?? null,
+    expenses: data?.expenses ?? [],
+    debts: data?.debts ?? [],
+    todayIso: todayStr,
+  });
+
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  const monthExpenses = (data?.expenses ?? []).filter((e) => e.due_date >= monthStart && e.due_date <= monthEnd);
+  const monthDeposits = (data?.deposits ?? []).filter((d) => d.deposited_on >= monthStart && d.deposited_on <= monthEnd);
+  const budgetMethod = (data?.profile?.budget_method ?? "fifty_thirty_twenty") as BudgetMethod;
+
+
   return (
     <div>
       <p className="eyebrow">Overview</p>
@@ -77,6 +95,20 @@ function OverviewPage() {
           Your focus: <span className="font-medium text-ink">{data.profile.money_goal}</span>
         </p>
       )}
+
+      {/* Cash on hand feeds the two cards below it, so it comes first. Rendered only
+          once the profile has loaded, so the editor doesn't flash open for people
+          who already saved a balance. */}
+      {data && (
+        <div className="mt-8">
+          <CashOnHandEditor profile={data.profile} userId={user.id} />
+        </div>
+      )}
+
+      <div className="mt-4 grid items-start gap-4 md:grid-cols-2">
+        <PaycheckPlanCard plan={plan} loading={!data} />
+        <NextMoneyMoveCard plan={plan} loading={!data} />
+      </div>
 
       {/* The one number people said matters most, with a plain explanation of what it is. */}
       <section className="paper-card mt-8 p-6 sm:p-8">
@@ -145,6 +177,18 @@ function OverviewPage() {
           <DebtFreeDate debts={data?.debts ?? []} method="snowball" compact />
         </div>
       )}
+
+      <div className="mt-4">
+        <BudgetMethodView
+          method={budgetMethod}
+          input={{
+            income: data?.profile?.monthly_income ?? null,
+            monthExpenses,
+            debts: data?.debts ?? [],
+            monthDeposits,
+          }}
+        />
+      </div>
 
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <section className="paper-card p-6">

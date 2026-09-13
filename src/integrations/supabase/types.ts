@@ -216,30 +216,54 @@ export type Database = {
       }
       profiles: {
         Row: {
+          balance_as_of: string | null
+          budget_method: string
+          cash_on_hand: number | null
           created_at: string
           display_name: string | null
           id: string
+          income_low_estimate: number | null
           money_goal: string | null
           monthly_income: number | null
+          next_pay_date: string | null
           onboarding_completed: boolean
+          pay_frequency: string | null
+          second_pay_date: string | null
+          spending_buffer: number
           updated_at: string
         }
         Insert: {
+          balance_as_of?: string | null
+          budget_method?: string
+          cash_on_hand?: number | null
           created_at?: string
           display_name?: string | null
           id: string
+          income_low_estimate?: number | null
           money_goal?: string | null
           monthly_income?: number | null
+          next_pay_date?: string | null
           onboarding_completed?: boolean
+          pay_frequency?: string | null
+          second_pay_date?: string | null
+          spending_buffer?: number
           updated_at?: string
         }
         Update: {
+          balance_as_of?: string | null
+          budget_method?: string
+          cash_on_hand?: number | null
           created_at?: string
           display_name?: string | null
           id?: string
+          income_low_estimate?: number | null
           money_goal?: string | null
           monthly_income?: number | null
+          next_pay_date?: string | null
           onboarding_completed?: boolean
+          pay_frequency?: string | null
+          second_pay_date?: string | null
+          spending_buffer?: number
           updated_at?: string
         }
         Relationships: []

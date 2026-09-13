@@ -9,6 +9,15 @@ export interface Profile {
   monthly_income: number | null;
   money_goal: string | null;
   onboarding_completed: boolean;
+  // Manual entry only — nothing here comes from a bank connection.
+  pay_frequency: string | null;
+  next_pay_date: string | null;
+  second_pay_date: string | null;
+  income_low_estimate: number | null;
+  cash_on_hand: number | null;
+  spending_buffer: number;
+  balance_as_of: string | null;
+  budget_method: string;
 }
 
 export interface SavingsGoal {
