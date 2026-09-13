@@ -7,9 +7,9 @@ import { fmt, today, type AlertSettings, type PlannedExpense, type Profile, type
 export const Route = createFileRoute("/_authenticated/alerts")({
   head: () => ({
     meta: [
-      { title: "Alerts — BudgetChek" },
+      { title: "Bill reminders — BudgetChek" },
       { name: "description", content: "Upcoming bills, low savings pace, and gentle nudges — all in one place." },
-      { property: "og:title", content: "Alerts — BudgetChek" },
+      { property: "og:title", content: "Bill reminders — BudgetChek" },
       { property: "og:description", content: "Upcoming bills, low savings pace, and gentle nudges — all in one place." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
@@ -77,7 +77,7 @@ function AlertsPage() {
     <div>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="eyebrow">Alerts</p>
+          <p className="eyebrow">Reminders</p>
           <h1 className="mt-2 font-serif text-3xl text-ink">Gentle nudges, no judgment</h1>
           <p className="mt-2 max-w-xl text-sm text-muted-foreground">
             These update automatically from what you've entered. Tune how far ahead we warn you in{" "}

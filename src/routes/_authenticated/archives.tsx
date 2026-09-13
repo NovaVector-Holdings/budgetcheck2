@@ -8,9 +8,9 @@ import { toast } from "sonner";
 export const Route = createFileRoute("/_authenticated/archives")({
   head: () => ({
     meta: [
-      { title: "Archives — BudgetChek" },
+      { title: "Archive — BudgetChek" },
       { name: "description", content: "Archived goals, debts, expenses, and meetings. Restore them anytime." },
-      { property: "og:title", content: "Archives — BudgetChek" },
+      { property: "og:title", content: "Archive — BudgetChek" },
       { property: "og:description", content: "Archived goals, debts, expenses, and meetings. Restore them anytime." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
@@ -66,7 +66,7 @@ function ArchivesPage() {
 
   return (
     <div>
-      <p className="eyebrow">Archives</p>
+      <p className="eyebrow">Archive</p>
       <h1 className="mt-2 font-serif text-3xl text-ink">Out of sight, not gone</h1>
       <p className="mt-2 max-w-xl text-sm text-muted-foreground">
         Finished goals, paid-off debts, old expenses — restore any of them with one tap.

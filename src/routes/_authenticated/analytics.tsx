@@ -6,9 +6,9 @@ import { fmt, type Debt, type PlannedExpense, type SavingsDeposit, type SavingsG
 export const Route = createFileRoute("/_authenticated/analytics")({
   head: () => ({
     meta: [
-      { title: "Money analytics — BudgetChek" },
+      { title: "Money reports — BudgetChek" },
       { name: "description", content: "See where your money stands: savings pace, debt trend, and spending by category." },
-      { property: "og:title", content: "Money analytics — BudgetChek" },
+      { property: "og:title", content: "Money reports — BudgetChek" },
       { property: "og:description", content: "See where your money stands: savings pace, debt trend, and spending by category." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
@@ -69,7 +69,7 @@ function AnalyticsPage() {
 
   return (
     <div>
-      <p className="eyebrow">Analytics</p>
+      <p className="eyebrow">Reports</p>
       <h1 className="mt-2 font-serif text-3xl text-ink">The story in your numbers</h1>
 
       {empty ? (
