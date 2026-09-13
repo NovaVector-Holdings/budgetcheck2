@@ -19,6 +19,7 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedSavingsRouteImport } from './routes/_authenticated/savings'
 import { Route as AuthenticatedOverviewRouteImport } from './routes/_authenticated/overview'
 import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authenticated/onboarding'
@@ -27,7 +28,9 @@ import { Route as AuthenticatedImportRouteImport } from './routes/_authenticated
 import { Route as AuthenticatedFutureExpensesRouteImport } from './routes/_authenticated/future-expenses'
 import { Route as AuthenticatedDebtRouteImport } from './routes/_authenticated/debt'
 import { Route as AuthenticatedCalendarRouteImport } from './routes/_authenticated/calendar'
+import { Route as AuthenticatedArchivesRouteImport } from './routes/_authenticated/archives'
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
+import { Route as AuthenticatedAlertsRouteImport } from './routes/_authenticated/alerts'
 
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   id: '/sitemap.xml',
@@ -78,6 +81,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedSavingsRoute = AuthenticatedSavingsRouteImport.update({
   id: '/savings',
   path: '/savings',
@@ -120,9 +128,19 @@ const AuthenticatedCalendarRoute = AuthenticatedCalendarRouteImport.update({
   path: '/calendar',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedArchivesRoute = AuthenticatedArchivesRouteImport.update({
+  id: '/archives',
+  path: '/archives',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedAnalyticsRoute = AuthenticatedAnalyticsRouteImport.update({
   id: '/analytics',
   path: '/analytics',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedAlertsRoute = AuthenticatedAlertsRouteImport.update({
+  id: '/alerts',
+  path: '/alerts',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 
@@ -136,7 +154,9 @@ export interface FileRoutesByFullPath {
   '/read': typeof ReadRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/alerts': typeof AuthenticatedAlertsRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
+  '/archives': typeof AuthenticatedArchivesRoute
   '/calendar': typeof AuthenticatedCalendarRoute
   '/debt': typeof AuthenticatedDebtRoute
   '/future-expenses': typeof AuthenticatedFutureExpensesRoute
@@ -145,6 +165,7 @@ export interface FileRoutesByFullPath {
   '/onboarding': typeof AuthenticatedOnboardingRoute
   '/overview': typeof AuthenticatedOverviewRoute
   '/savings': typeof AuthenticatedSavingsRoute
+  '/settings': typeof AuthenticatedSettingsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -156,7 +177,9 @@ export interface FileRoutesByTo {
   '/read': typeof ReadRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/alerts': typeof AuthenticatedAlertsRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
+  '/archives': typeof AuthenticatedArchivesRoute
   '/calendar': typeof AuthenticatedCalendarRoute
   '/debt': typeof AuthenticatedDebtRoute
   '/future-expenses': typeof AuthenticatedFutureExpensesRoute
@@ -165,6 +188,7 @@ export interface FileRoutesByTo {
   '/onboarding': typeof AuthenticatedOnboardingRoute
   '/overview': typeof AuthenticatedOverviewRoute
   '/savings': typeof AuthenticatedSavingsRoute
+  '/settings': typeof AuthenticatedSettingsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -178,7 +202,9 @@ export interface FileRoutesById {
   '/read': typeof ReadRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/_authenticated/alerts': typeof AuthenticatedAlertsRoute
   '/_authenticated/analytics': typeof AuthenticatedAnalyticsRoute
+  '/_authenticated/archives': typeof AuthenticatedArchivesRoute
   '/_authenticated/calendar': typeof AuthenticatedCalendarRoute
   '/_authenticated/debt': typeof AuthenticatedDebtRoute
   '/_authenticated/future-expenses': typeof AuthenticatedFutureExpensesRoute
@@ -187,6 +213,7 @@ export interface FileRoutesById {
   '/_authenticated/onboarding': typeof AuthenticatedOnboardingRoute
   '/_authenticated/overview': typeof AuthenticatedOverviewRoute
   '/_authenticated/savings': typeof AuthenticatedSavingsRoute
+  '/_authenticated/settings': typeof AuthenticatedSettingsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -200,7 +227,9 @@ export interface FileRouteTypes {
     | '/read'
     | '/reset-password'
     | '/sitemap.xml'
+    | '/alerts'
     | '/analytics'
+    | '/archives'
     | '/calendar'
     | '/debt'
     | '/future-expenses'
@@ -209,6 +238,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/overview'
     | '/savings'
+    | '/settings'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -220,7 +250,9 @@ export interface FileRouteTypes {
     | '/read'
     | '/reset-password'
     | '/sitemap.xml'
+    | '/alerts'
     | '/analytics'
+    | '/archives'
     | '/calendar'
     | '/debt'
     | '/future-expenses'
@@ -229,6 +261,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/overview'
     | '/savings'
+    | '/settings'
   id:
     | '__root__'
     | '/'
@@ -241,7 +274,9 @@ export interface FileRouteTypes {
     | '/read'
     | '/reset-password'
     | '/sitemap.xml'
+    | '/_authenticated/alerts'
     | '/_authenticated/analytics'
+    | '/_authenticated/archives'
     | '/_authenticated/calendar'
     | '/_authenticated/debt'
     | '/_authenticated/future-expenses'
@@ -250,6 +285,7 @@ export interface FileRouteTypes {
     | '/_authenticated/onboarding'
     | '/_authenticated/overview'
     | '/_authenticated/savings'
+    | '/_authenticated/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -337,6 +373,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/settings': {
+      id: '/_authenticated/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AuthenticatedSettingsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/savings': {
       id: '/_authenticated/savings'
       path: '/savings'
@@ -393,6 +436,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCalendarRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/archives': {
+      id: '/_authenticated/archives'
+      path: '/archives'
+      fullPath: '/archives'
+      preLoaderRoute: typeof AuthenticatedArchivesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/analytics': {
       id: '/_authenticated/analytics'
       path: '/analytics'
@@ -400,11 +450,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAnalyticsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/alerts': {
+      id: '/_authenticated/alerts'
+      path: '/alerts'
+      fullPath: '/alerts'
+      preLoaderRoute: typeof AuthenticatedAlertsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedAlertsRoute: typeof AuthenticatedAlertsRoute
   AuthenticatedAnalyticsRoute: typeof AuthenticatedAnalyticsRoute
+  AuthenticatedArchivesRoute: typeof AuthenticatedArchivesRoute
   AuthenticatedCalendarRoute: typeof AuthenticatedCalendarRoute
   AuthenticatedDebtRoute: typeof AuthenticatedDebtRoute
   AuthenticatedFutureExpensesRoute: typeof AuthenticatedFutureExpensesRoute
@@ -413,10 +472,13 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedOnboardingRoute: typeof AuthenticatedOnboardingRoute
   AuthenticatedOverviewRoute: typeof AuthenticatedOverviewRoute
   AuthenticatedSavingsRoute: typeof AuthenticatedSavingsRoute
+  AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedAlertsRoute: AuthenticatedAlertsRoute,
   AuthenticatedAnalyticsRoute: AuthenticatedAnalyticsRoute,
+  AuthenticatedArchivesRoute: AuthenticatedArchivesRoute,
   AuthenticatedCalendarRoute: AuthenticatedCalendarRoute,
   AuthenticatedDebtRoute: AuthenticatedDebtRoute,
   AuthenticatedFutureExpensesRoute: AuthenticatedFutureExpensesRoute,
@@ -425,6 +487,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedOnboardingRoute: AuthenticatedOnboardingRoute,
   AuthenticatedOverviewRoute: AuthenticatedOverviewRoute,
   AuthenticatedSavingsRoute: AuthenticatedSavingsRoute,
+  AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
