@@ -22,8 +22,12 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedSavingsRouteImport } from './routes/_authenticated/savings'
 import { Route as AuthenticatedOverviewRouteImport } from './routes/_authenticated/overview'
 import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authenticated/onboarding'
+import { Route as AuthenticatedMoneyMeetingRouteImport } from './routes/_authenticated/money-meeting'
+import { Route as AuthenticatedImportRouteImport } from './routes/_authenticated/import'
 import { Route as AuthenticatedFutureExpensesRouteImport } from './routes/_authenticated/future-expenses'
 import { Route as AuthenticatedDebtRouteImport } from './routes/_authenticated/debt'
+import { Route as AuthenticatedCalendarRouteImport } from './routes/_authenticated/calendar'
+import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
 
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   id: '/sitemap.xml',
@@ -89,6 +93,17 @@ const AuthenticatedOnboardingRoute = AuthenticatedOnboardingRouteImport.update({
   path: '/onboarding',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedMoneyMeetingRoute =
+  AuthenticatedMoneyMeetingRouteImport.update({
+    id: '/money-meeting',
+    path: '/money-meeting',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedImportRoute = AuthenticatedImportRouteImport.update({
+  id: '/import',
+  path: '/import',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedFutureExpensesRoute =
   AuthenticatedFutureExpensesRouteImport.update({
     id: '/future-expenses',
@@ -98,6 +113,16 @@ const AuthenticatedFutureExpensesRoute =
 const AuthenticatedDebtRoute = AuthenticatedDebtRouteImport.update({
   id: '/debt',
   path: '/debt',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedCalendarRoute = AuthenticatedCalendarRouteImport.update({
+  id: '/calendar',
+  path: '/calendar',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedAnalyticsRoute = AuthenticatedAnalyticsRouteImport.update({
+  id: '/analytics',
+  path: '/analytics',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 
@@ -111,8 +136,12 @@ export interface FileRoutesByFullPath {
   '/read': typeof ReadRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/analytics': typeof AuthenticatedAnalyticsRoute
+  '/calendar': typeof AuthenticatedCalendarRoute
   '/debt': typeof AuthenticatedDebtRoute
   '/future-expenses': typeof AuthenticatedFutureExpensesRoute
+  '/import': typeof AuthenticatedImportRoute
+  '/money-meeting': typeof AuthenticatedMoneyMeetingRoute
   '/onboarding': typeof AuthenticatedOnboardingRoute
   '/overview': typeof AuthenticatedOverviewRoute
   '/savings': typeof AuthenticatedSavingsRoute
@@ -127,8 +156,12 @@ export interface FileRoutesByTo {
   '/read': typeof ReadRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/analytics': typeof AuthenticatedAnalyticsRoute
+  '/calendar': typeof AuthenticatedCalendarRoute
   '/debt': typeof AuthenticatedDebtRoute
   '/future-expenses': typeof AuthenticatedFutureExpensesRoute
+  '/import': typeof AuthenticatedImportRoute
+  '/money-meeting': typeof AuthenticatedMoneyMeetingRoute
   '/onboarding': typeof AuthenticatedOnboardingRoute
   '/overview': typeof AuthenticatedOverviewRoute
   '/savings': typeof AuthenticatedSavingsRoute
@@ -145,8 +178,12 @@ export interface FileRoutesById {
   '/read': typeof ReadRoute
   '/reset-password': typeof ResetPasswordRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/_authenticated/analytics': typeof AuthenticatedAnalyticsRoute
+  '/_authenticated/calendar': typeof AuthenticatedCalendarRoute
   '/_authenticated/debt': typeof AuthenticatedDebtRoute
   '/_authenticated/future-expenses': typeof AuthenticatedFutureExpensesRoute
+  '/_authenticated/import': typeof AuthenticatedImportRoute
+  '/_authenticated/money-meeting': typeof AuthenticatedMoneyMeetingRoute
   '/_authenticated/onboarding': typeof AuthenticatedOnboardingRoute
   '/_authenticated/overview': typeof AuthenticatedOverviewRoute
   '/_authenticated/savings': typeof AuthenticatedSavingsRoute
@@ -163,8 +200,12 @@ export interface FileRouteTypes {
     | '/read'
     | '/reset-password'
     | '/sitemap.xml'
+    | '/analytics'
+    | '/calendar'
     | '/debt'
     | '/future-expenses'
+    | '/import'
+    | '/money-meeting'
     | '/onboarding'
     | '/overview'
     | '/savings'
@@ -179,8 +220,12 @@ export interface FileRouteTypes {
     | '/read'
     | '/reset-password'
     | '/sitemap.xml'
+    | '/analytics'
+    | '/calendar'
     | '/debt'
     | '/future-expenses'
+    | '/import'
+    | '/money-meeting'
     | '/onboarding'
     | '/overview'
     | '/savings'
@@ -196,8 +241,12 @@ export interface FileRouteTypes {
     | '/read'
     | '/reset-password'
     | '/sitemap.xml'
+    | '/_authenticated/analytics'
+    | '/_authenticated/calendar'
     | '/_authenticated/debt'
     | '/_authenticated/future-expenses'
+    | '/_authenticated/import'
+    | '/_authenticated/money-meeting'
     | '/_authenticated/onboarding'
     | '/_authenticated/overview'
     | '/_authenticated/savings'
@@ -309,6 +358,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedOnboardingRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/money-meeting': {
+      id: '/_authenticated/money-meeting'
+      path: '/money-meeting'
+      fullPath: '/money-meeting'
+      preLoaderRoute: typeof AuthenticatedMoneyMeetingRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/import': {
+      id: '/_authenticated/import'
+      path: '/import'
+      fullPath: '/import'
+      preLoaderRoute: typeof AuthenticatedImportRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/future-expenses': {
       id: '/_authenticated/future-expenses'
       path: '/future-expenses'
@@ -323,20 +386,42 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDebtRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/calendar': {
+      id: '/_authenticated/calendar'
+      path: '/calendar'
+      fullPath: '/calendar'
+      preLoaderRoute: typeof AuthenticatedCalendarRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/analytics': {
+      id: '/_authenticated/analytics'
+      path: '/analytics'
+      fullPath: '/analytics'
+      preLoaderRoute: typeof AuthenticatedAnalyticsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedAnalyticsRoute: typeof AuthenticatedAnalyticsRoute
+  AuthenticatedCalendarRoute: typeof AuthenticatedCalendarRoute
   AuthenticatedDebtRoute: typeof AuthenticatedDebtRoute
   AuthenticatedFutureExpensesRoute: typeof AuthenticatedFutureExpensesRoute
+  AuthenticatedImportRoute: typeof AuthenticatedImportRoute
+  AuthenticatedMoneyMeetingRoute: typeof AuthenticatedMoneyMeetingRoute
   AuthenticatedOnboardingRoute: typeof AuthenticatedOnboardingRoute
   AuthenticatedOverviewRoute: typeof AuthenticatedOverviewRoute
   AuthenticatedSavingsRoute: typeof AuthenticatedSavingsRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedAnalyticsRoute: AuthenticatedAnalyticsRoute,
+  AuthenticatedCalendarRoute: AuthenticatedCalendarRoute,
   AuthenticatedDebtRoute: AuthenticatedDebtRoute,
   AuthenticatedFutureExpensesRoute: AuthenticatedFutureExpensesRoute,
+  AuthenticatedImportRoute: AuthenticatedImportRoute,
+  AuthenticatedMoneyMeetingRoute: AuthenticatedMoneyMeetingRoute,
   AuthenticatedOnboardingRoute: AuthenticatedOnboardingRoute,
   AuthenticatedOverviewRoute: AuthenticatedOverviewRoute,
   AuthenticatedSavingsRoute: AuthenticatedSavingsRoute,

@@ -26,13 +26,11 @@ function expandRecurring(e: PlannedExpense, monthStart: Date, monthEnd: Date): s
     if (due >= monthStart && due <= monthEnd) dates.push(e.due_date);
     return dates;
   }
-  const stepDays = e.recurring === "weekly" ? 7 : e.recurring === "monthly" ? 30.44 : 365.25;
   const d = new Date(due);
   while (d < monthStart) {
     if (e.recurring === "weekly") d.setDate(d.getDate() + 7);
     else if (e.recurring === "monthly") d.setMonth(d.getMonth() + 1);
     else d.setFullYear(d.getFullYear() + 1);
-    if (stepDays === 0) break;
   }
   while (d <= monthEnd) {
     dates.push(d.toISOString().slice(0, 10));
@@ -59,7 +57,7 @@ function CalendarPage() {
       ]);
       return {
         expenses: (expenses.data ?? []) as PlannedExpense[],
-        meetings: (meetings.data ?? []) as MoneyMeeting[],
+        meetings: (meetings.data ?? []) as unknown as MoneyMeeting[],
       };
     },
   });

@@ -37,7 +37,7 @@ function MoneyMeetingPage() {
         .select("*")
         .eq("archived", false)
         .order("held_on", { ascending: false });
-      return (data ?? []) as MoneyMeeting[];
+      return (data ?? []) as unknown as MoneyMeeting[];
     },
   });
 
@@ -45,7 +45,7 @@ function MoneyMeetingPage() {
     mutationFn: async () => {
       const { error } = await supabase.from("money_meetings").insert({
         user_id: user.id,
-        checklist,
+        checklist: JSON.parse(JSON.stringify(checklist)),
         notes: notes.trim() || null,
       });
       if (error) throw error;
