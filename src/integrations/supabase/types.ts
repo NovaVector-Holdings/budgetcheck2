@@ -129,6 +129,411 @@ export type Database = {
           },
         ]
       }
+      mm_accounts: {
+        Row: {
+          archived: boolean
+          balance_as_of: string | null
+          created_at: string
+          credit_limit: number | null
+          current_balance: number
+          id: string
+          institution: string | null
+          kind: string
+          name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          archived?: boolean
+          balance_as_of?: string | null
+          created_at?: string
+          credit_limit?: number | null
+          current_balance?: number
+          id?: string
+          institution?: string | null
+          kind?: string
+          name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          archived?: boolean
+          balance_as_of?: string | null
+          created_at?: string
+          credit_limit?: number | null
+          current_balance?: number
+          id?: string
+          institution?: string | null
+          kind?: string
+          name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mm_accounts_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mm_artifacts: {
+        Row: {
+          archived: boolean
+          check_state: Json
+          created_at: string
+          id: string
+          kind: string
+          payload: Json
+          source_import_id: string | null
+          takeaway: string | null
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          archived?: boolean
+          check_state?: Json
+          created_at?: string
+          id?: string
+          kind: string
+          payload?: Json
+          source_import_id?: string | null
+          takeaway?: string | null
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          archived?: boolean
+          check_state?: Json
+          created_at?: string
+          id?: string
+          kind?: string
+          payload?: Json
+          source_import_id?: string | null
+          takeaway?: string | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mm_artifacts_source_import_id_fkey"
+            columns: ["source_import_id"]
+            isOneToOne: false
+            referencedRelation: "mm_imports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mm_artifacts_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mm_imports: {
+        Row: {
+          account_id: string | null
+          column_map: Json
+          created_at: string
+          file_name: string | null
+          id: string
+          period_end: string | null
+          period_start: string | null
+          txn_count: number
+          txns: Json
+          user_id: string
+        }
+        Insert: {
+          account_id?: string | null
+          column_map?: Json
+          created_at?: string
+          file_name?: string | null
+          id?: string
+          period_end?: string | null
+          period_start?: string | null
+          txn_count?: number
+          txns?: Json
+          user_id: string
+        }
+        Update: {
+          account_id?: string | null
+          column_map?: Json
+          created_at?: string
+          file_name?: string | null
+          id?: string
+          period_end?: string | null
+          period_start?: string | null
+          txn_count?: number
+          txns?: Json
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mm_imports_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "mm_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mm_imports_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mm_messages: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          role: string
+          session_id: string
+          user_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          role: string
+          session_id: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          role?: string
+          session_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mm_messages_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "mm_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mm_messages_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mm_pattern_rules: {
+        Row: {
+          active: boolean
+          classify_as: string
+          created_at: string
+          id: string
+          note: string | null
+          pattern: string
+          user_id: string
+        }
+        Insert: {
+          active?: boolean
+          classify_as: string
+          created_at?: string
+          id?: string
+          note?: string | null
+          pattern: string
+          user_id: string
+        }
+        Update: {
+          active?: boolean
+          classify_as?: string
+          created_at?: string
+          id?: string
+          note?: string | null
+          pattern?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mm_pattern_rules_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mm_priority_overrides: {
+        Row: {
+          created_at: string
+          id: string
+          label: string
+          reason: string | null
+          ref_id: string
+          ref_kind: string
+          tier: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          label: string
+          reason?: string | null
+          ref_id: string
+          ref_kind: string
+          tier: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          label?: string
+          reason?: string | null
+          ref_id?: string
+          ref_kind?: string
+          tier?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mm_priority_overrides_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mm_reserved_funds: {
+        Row: {
+          amount: number
+          archived: boolean
+          created_at: string
+          id: string
+          label: string
+          purpose: string | null
+          tapped_amount: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          amount?: number
+          archived?: boolean
+          created_at?: string
+          id?: string
+          label: string
+          purpose?: string | null
+          tapped_amount?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          archived?: boolean
+          created_at?: string
+          id?: string
+          label?: string
+          purpose?: string | null
+          tapped_amount?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mm_reserved_funds_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mm_sessions: {
+        Row: {
+          archived: boolean
+          created_at: string
+          id: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          archived?: boolean
+          created_at?: string
+          id?: string
+          title?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          archived?: boolean
+          created_at?: string
+          id?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mm_sessions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mm_spending_caps: {
+        Row: {
+          cap_amount: number
+          category: string
+          created_at: string
+          id: string
+          instrument_label: string | null
+          instrument_limit: number | null
+          period: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          cap_amount: number
+          category: string
+          created_at?: string
+          id?: string
+          instrument_label?: string | null
+          instrument_limit?: number | null
+          period?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          cap_amount?: number
+          category?: string
+          created_at?: string
+          id?: string
+          instrument_label?: string | null
+          instrument_limit?: number | null
+          period?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mm_spending_caps_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       money_meetings: {
         Row: {
           archived: boolean
