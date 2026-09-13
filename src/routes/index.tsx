@@ -4,13 +4,13 @@ import { ArrowRight, Headphones, BookOpen, Briefcase, LifeBuoy, ShieldCheck } fr
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "IDEOU Money — Trustworthy financial literacy, no fluff" },
+      { title: "BudgetChek — Trustworthy financial literacy, no fluff" },
       {
         name: "description",
         content:
-          "Free audio lessons, guides, and local help — sourced only from federal agencies and major nonprofits. Built by the IDEOU team.",
+          "Free audio lessons, guides, and local help — sourced only from federal agencies and major nonprofits. Built by the BudgetChek team.",
       },
-      { property: "og:title", content: "IDEOU Money — Trustworthy financial literacy" },
+      { property: "og:title", content: "BudgetChek — Trustworthy financial literacy" },
       {
         property: "og:description",
         content:
@@ -75,7 +75,7 @@ function Home() {
               <span className="italic text-gold">— honestly.</span>
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
-              IDEOU Money is a small team of designers and educators building
+              BudgetChek is a small team of designers and educators building
               budgeting acumen the way it should be taught: in short audio lessons,
               free guides, and pointers to real help — all sourced from agencies
               you can verify.
@@ -175,7 +175,7 @@ function Home() {
           </div>
           <div className="space-y-4 text-base leading-relaxed text-foreground">
             <p>
-              Everything on IDEOU Money traces back to a named, publicly-published
+              Everything on BudgetChek traces back to a named, publicly-published
               source — federal agencies like CFPB, the SEC, FDIC, FTC, IRS and HHS,
               or long-established nonprofits like United Way (211) and NFCC.
             </p>

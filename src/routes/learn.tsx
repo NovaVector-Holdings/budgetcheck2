@@ -7,13 +7,13 @@ import { learnResources } from "@/lib/resources";
 export const Route = createFileRoute("/learn")({
   head: () => ({
     meta: [
-      { title: "Listen · Short audio lessons on money — IDEOU Money" },
+      { title: "Listen · Short audio lessons on money — BudgetChek" },
       {
         name: "description",
         content:
           "3-minute audio lessons summarizing CFPB, FDIC, SEC, and FTC consumer-finance material. Each lesson links back to its source.",
       },
-      { property: "og:title", content: "Listen · IDEOU Money" },
+      { property: "og:title", content: "Listen · BudgetChek" },
       {
         property: "og:description",
         content:

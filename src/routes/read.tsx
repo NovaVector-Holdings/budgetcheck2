@@ -5,13 +5,13 @@ import { readResources } from "@/lib/resources";
 export const Route = createFileRoute("/read")({
   head: () => ({
     meta: [
-      { title: "Read · Free guides & workbooks — IDEOU Money" },
+      { title: "Read · Free guides & workbooks — BudgetChek" },
       {
         name: "description",
         content:
           "Vetted, free PDFs and guides from CFPB, the SEC, the FTC, FDIC, and other trusted publishers.",
       },
-      { property: "og:title", content: "Read · IDEOU Money" },
+      { property: "og:title", content: "Read · BudgetChek" },
       {
         property: "og:description",
         content: "Free, publisher-named guides on budgeting, credit, debt, and investing.",

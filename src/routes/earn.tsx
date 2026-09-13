@@ -6,13 +6,13 @@ import { earnResources } from "@/lib/resources";
 export const Route = createFileRoute("/earn")({
   head: () => ({
     meta: [
-      { title: "Earn · Legit ways to grow income — IDEOU Money" },
+      { title: "Earn · Legit ways to grow income — BudgetChek" },
       {
         name: "description",
         content:
           "Trusted U.S. job portals, apprenticeship programs, and FTC guidance on spotting work-from-home scams.",
       },
-      { property: "og:title", content: "Earn · IDEOU Money" },
+      { property: "og:title", content: "Earn · BudgetChek" },
       {
         property: "og:description",
         content: "Public job portals, paid apprenticeships, and scam warnings.",

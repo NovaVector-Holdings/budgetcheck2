@@ -20,7 +20,7 @@ export function SiteHeader() {
             i
           </span>
           <span className="font-serif text-lg font-semibold tracking-tight text-ink">
-            IDEOU<span className="text-gold">·</span>Money
+            BudgetChek<span className="text-gold">·</span>Money
           </span>
         </Link>
         <nav className="hidden gap-1 md:flex">
@@ -45,7 +45,7 @@ export function SiteFooter() {
     <footer className="mt-24 border-t border-border/70 bg-secondary/40">
       <div className="mx-auto max-w-6xl px-6 py-10 text-sm text-muted-foreground">
         <p className="font-serif text-base text-ink">
-          Built by the IDEOU team — financial literacy you can verify.
+          Built by the BudgetChek team — financial literacy you can verify.
         </p>
         <p className="mt-2 max-w-2xl leading-relaxed">
           Every guide, dollar figure, and link on this site points to a public,
@@ -54,7 +54,7 @@ export function SiteFooter() {
           ask for your bank credentials.
         </p>
         <p className="mt-4 text-xs">
-          Educational use only. Not investment, tax, or legal advice. © {new Date().getFullYear()} IDEOU.
+          Educational use only. Not investment, tax, or legal advice. © {new Date().getFullYear()} BudgetChek.
         </p>
       </div>
     </footer>
