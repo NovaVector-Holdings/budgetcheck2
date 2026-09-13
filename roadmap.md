@@ -11,3 +11,6 @@
 ## Open / blocked
 - [ ] Google sign-in untested end-to-end — preview has no signed-in session to inject; test manually after first signup
 - [ ] Email confirmation is ON: new signups must click the email link before signing in (default, safer)
+
+## Done (demo)
+- [x] Demo account (demo@budgetchek.app) with seeded sample data + "Explore the demo account" button on /auth — verified end-to-end
