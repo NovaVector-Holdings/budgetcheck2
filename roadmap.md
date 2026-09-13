@@ -14,3 +14,6 @@
 
 ## Done (demo)
 - [x] Demo account (demo@budgetchek.app) with seeded sample data + "Explore the demo account" button on /auth — verified end-to-end
+
+## Open
+- [x] Hero on homepage with two value cards (learn + my money), verified desktop + mobile

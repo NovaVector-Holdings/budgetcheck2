@@ -52,6 +52,27 @@ const pillars = [
   },
 ] as const;
 
+const twoSides = [
+  {
+    to: "/learn",
+    icon: Headphones,
+    eyebrow: "Learn money",
+    title: "Understand money, in minutes a week",
+    body: "Short audio lessons, free guides from federal agencies, legit ways to earn, and local help near you. No account needed — every fact links to its source.",
+    bullets: ["3-minute audio lessons", "CFPB, SEC & FTC guides", "211 and local assistance"],
+    cta: "Start learning",
+  },
+  {
+    to: "/auth",
+    icon: ShieldCheck,
+    eyebrow: "My money",
+    title: "Your own plan, private to you",
+    body: "A free account turns what you learn into a plan: savings goals, a debt payoff strategy, a bill calendar, and a weekly money meeting with yourself.",
+    bullets: ["Savings & debt trackers", "Bill calendar & alerts", "Charts that show progress"],
+    cta: "Create a free account",
+  },
+] as const;
+
 function Home() {
   return (
     <>
@@ -65,75 +86,71 @@ function Home() {
               "radial-gradient(60% 80% at 80% 0%, oklch(0.91 0.04 75 / 0.6), transparent 60%), radial-gradient(50% 60% at 0% 100%, oklch(0.34 0.055 165 / 0.15), transparent 60%)",
           }}
         />
-        <div className="mx-auto grid max-w-6xl gap-10 px-6 pb-16 pt-20 lg:grid-cols-[1.2fr_1fr] lg:gap-16">
-          <div>
+        <div className="mx-auto max-w-6xl px-6 pb-16 pt-20">
+          <div className="mx-auto max-w-3xl text-center">
             <span className="eyebrow">Financial literacy · No paywall · No fluff</span>
             <h1 className="heading-display mt-4 text-5xl text-ink sm:text-6xl">
               Money is a skill.
               <br />
-              <span className="text-primary">We help you build it</span>{" "}
-              <span className="italic text-gold">— honestly.</span>
+              <span className="text-primary">Learn it,</span>{" "}
+              <span className="italic text-gold">then work it.</span>
             </h1>
-            <p className="mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
-              BudgetChek is a small team of designers and educators building
-              budgeting acumen the way it should be taught: in short audio lessons,
-              free guides, and pointers to real help — all sourced from agencies
-              you can verify.
+            <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
+              BudgetChek pairs trustworthy money education with simple private
+              tools — so you can understand your money and actually do something
+              about it, in the same place.
             </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Link
-                to="/learn"
-                className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground transition-transform hover:-translate-y-0.5"
-              >
-                Start a 3-minute lesson <ArrowRight className="h-4 w-4" />
-              </Link>
-              <Link
-                to="/read"
-                className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-5 py-3 text-sm font-semibold text-ink hover:bg-secondary"
-              >
-                Browse free guides
-              </Link>
-              <Link
-                to="/auth"
-                search={{ redirect: undefined }}
-                className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-5 py-3 text-sm font-semibold text-ink hover:bg-secondary"
-              >
-                Create a free account
-              </Link>
-            </div>
-
-            <div className="mt-8 flex items-center gap-2 text-sm text-muted-foreground">
-              <ShieldCheck className="h-4 w-4 text-primary" />
-              Every fact links back to its public source.
-            </div>
           </div>
 
-          <div className="relative">
-            <div className="paper-card relative p-8">
-              <span className="eyebrow">Today&rsquo;s lesson</span>
-              <h3 className="mt-3 font-serif text-2xl text-ink">
-                Building your first budget
-              </h3>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                A budget is a plan for the money coming in and going out. In three
-                minutes we&rsquo;ll walk through the framework CFPB publishes in
-                its Your Money, Your Goals toolkit.
-              </p>
+          {/* Two sides of the product */}
+          <div className="mt-12 grid gap-4 md:grid-cols-2 md:gap-6">
+            {twoSides.map((side) => (
               <Link
-                to="/learn"
-                className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline"
+                key={side.eyebrow}
+                to={side.to}
+                {...(side.to === "/auth" ? { search: { redirect: undefined } } : {})}
+                className="paper-card group relative flex flex-col gap-5 p-8 transition-transform hover:-translate-y-1"
               >
-                Open in the player <ArrowRight className="h-4 w-4" />
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-secondary text-primary">
+                    <side.icon className="h-5 w-5" />
+                  </span>
+                  <span className="eyebrow">{side.eyebrow}</span>
+                </div>
+                <div>
+                  <h2 className="font-serif text-2xl text-ink">{side.title}</h2>
+                  <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                    {side.body}
+                  </p>
+                </div>
+                <ul className="space-y-2 text-sm text-foreground">
+                  {side.bullets.map((b) => (
+                    <li key={b} className="flex items-center gap-2">
+                      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-gold" />
+                      {b}
+                    </li>
+                  ))}
+                </ul>
+                <span className="mt-auto inline-flex items-center gap-2 text-sm font-semibold text-primary">
+                  {side.cta}
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                </span>
               </Link>
-              <div className="mt-6 flex items-center gap-2 border-t border-border pt-4 text-xs text-muted-foreground">
-                <ShieldCheck className="h-3.5 w-3.5" />
-                Source: Consumer Financial Protection Bureau
-              </div>
-            </div>
-            <div
-              aria-hidden
-              className="absolute -right-6 -top-6 -z-10 h-28 w-28 rounded-full bg-gold/40 blur-2xl"
-            />
+            ))}
+          </div>
+
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
+            <span className="flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-primary" />
+              Every fact links back to its public source.
+            </span>
+            <span className="flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-primary" />
+              Your numbers stay private to your account.
+            </span>
+            <Link to="/auth" search={{ redirect: undefined }} className="font-semibold text-primary hover:underline">
+              Just looking? Try the demo account
+            </Link>
           </div>
         </div>
       </section>
