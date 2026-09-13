@@ -153,6 +153,28 @@ export function ImportPanel({ userId, userRules, imports, knownBills, onImported
     onError: () => toast.error("Couldn't save that file."),
   });
 
+  /** Carried over from the old separate import page: turn a repeating charge into a tracked bill. */
+  const addBill = useMutation({
+    mutationFn: async (item: { label: string; typicalAmount: number }) => {
+      const dates = finalTxns
+        .filter((t) => t.description === item.label)
+        .map((t) => t.date)
+        .sort();
+      const { error } = await supabase.from("planned_expenses").insert({
+        user_id: userId,
+        name: item.label.slice(0, 120),
+        amount: item.typicalAmount,
+        due_date: dates[dates.length - 1] ?? new Date().toISOString().slice(0, 10),
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Added to Bills & expenses.");
+      qc.invalidateQueries({ queryKey: ["expenses", userId] });
+    },
+    onError: () => toast.error("Couldn't add that one."),
+  });
+
   const answerFor = (id: string) => answers.find((a) => a.questionId === id);
   const setAnswer = (a: Answer) => setAnswers((prev) => [...prev.filter((x) => x.questionId !== a.questionId), a]);
 
