@@ -16,7 +16,7 @@ const primaryNav = [
 const moreNav = [
   { to: "/calendar", label: "Calendar" },
   { to: "/money-meeting", label: "Money meeting" },
-  { to: "/import", label: "Import spending" },
+  
   { to: "/alerts", label: "Reminders" },
   { to: "/archives", label: "Archive" },
   { to: "/settings", label: "Settings" },

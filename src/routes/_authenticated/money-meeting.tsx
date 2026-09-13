@@ -16,7 +16,13 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { ArrowRight } from "lucide-react";
 
+const TAB_KEYS = ["weekly", "monthly", "ask", "plans", "statements", "data"] as const;
+
 export const Route = createFileRoute("/_authenticated/money-meeting")({
+  validateSearch: (search: Record<string, unknown>): { tab?: (typeof TAB_KEYS)[number] } =>
+    TAB_KEYS.includes(search.tab as (typeof TAB_KEYS)[number])
+      ? { tab: search.tab as (typeof TAB_KEYS)[number] }
+      : {},
   head: () => ({
     meta: [
       { title: "Money meeting — BudgetChek" },
@@ -87,7 +93,8 @@ const TABS: { key: Tab; nav: string; eyebrow: string; heading: string; caption: 
 function MoneyMeetingPage() {
   const { user } = Route.useRouteContext();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>("weekly");
+  const search = Route.useSearch();
+  const [tab, setTab] = useState<Tab>(search.tab ?? "weekly");
   const state = useMoneyState(user.id);
   const meta = TABS.find((t) => t.key === tab)!;
 
