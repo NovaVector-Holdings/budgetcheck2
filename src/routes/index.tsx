@@ -96,10 +96,45 @@ function Home() {
               <span className="italic text-gold">then work it.</span>
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
-              BudgetChek pairs trustworthy money education with simple private
-              tools — so you can understand your money and actually do something
-              about it, in the same place.
+              BudgetChek shows you exactly when you'll be debt-free and gives you the tools to get there faster —
+              paired with trustworthy money education, in the same place.
             </p>
+          </div>
+
+          {/* The headline promise, shown as a shape people recognise. */}
+          <div className="paper-card mx-auto mt-10 max-w-3xl p-6">
+            <div className="grid gap-6 sm:grid-cols-[1fr_1.1fr] sm:items-center">
+              <div>
+                <p className="eyebrow">See your debt-free date</p>
+                <p className="mt-2 font-serif text-2xl text-ink">
+                  One date. Then every dollar you add moves it closer.
+                </p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Enter your balances, rates, and payments and BudgetChek counts the months for you — then shows what an
+                  extra $25 or $50 a month would do.
+                </p>
+                <Link
+                  to="/auth"
+                  search={{ redirect: undefined }}
+                  className="mt-4 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+                >
+                  Find my debt-free date
+                </Link>
+              </div>
+              <figure>
+                <svg viewBox="0 0 100 40" className="h-32 w-full" preserveAspectRatio="none" role="img" aria-label="Example chart of a debt balance falling to zero over time">
+                  <path d="M 0 4 C 30 10, 55 26, 100 39 L 100 40 L 0 40 Z" fill="var(--color-primary)" opacity="0.14" />
+                  <path d="M 0 4 C 30 10, 55 26, 100 39" fill="none" stroke="var(--color-primary)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                </svg>
+                <figcaption className="mt-2 flex justify-between text-[11px] text-muted-foreground">
+                  <span>What you owe today</span>
+                  <span>$0 — your debt-free date</span>
+                </figcaption>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Example shape only. Your own numbers draw this line once you add your debts.
+                </p>
+              </figure>
+            </div>
           </div>
 
           {/* Two sides of the product */}

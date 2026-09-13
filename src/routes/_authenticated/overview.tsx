@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { DebtFreeDate } from "@/components/debt-free-date";
 import { fmt, today, type Debt, type PlannedExpense, type Profile, type SavingsDeposit, type SavingsGoal } from "@/lib/money";
 
 export const Route = createFileRoute("/_authenticated/overview")({
@@ -138,6 +139,12 @@ function OverviewPage() {
           <p className="mt-1 text-xs text-muted-foreground">What's left on your debts</p>
         </Link>
       </div>
+
+      {(data?.debts ?? []).length > 0 && (
+        <div className="mt-4">
+          <DebtFreeDate debts={data?.debts ?? []} method="snowball" compact />
+        </div>
+      )}
 
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <section className="paper-card p-6">

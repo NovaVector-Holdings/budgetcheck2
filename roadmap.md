@@ -23,3 +23,9 @@
 - [x] Chart keys added to Reports
 - [x] Nav cut to 5 primary tools (Overview, Bills, Savings, Debt, Reports) + "More"
 - [x] Renames: Future Expenses→Bills & expenses, Analytics→Reports, Debt Strategy→Debt, Import & Analyze→Import spending, Alerts→Reminders, Archives→Archive
+
+- [x] Import & Analyze outputs a full plain-language review (KPIs, month-by-month, categories, largest charges, wins/gaps, next steps)
+- [x] Monthly guided review session in Money meeting (guide avatar, CSV step with loading spinner, balance updates with pause, report + next move, saved to Archive)
+- [x] "More" tab now opens and closes the extra tools row
+
+- [x] Debt-free date: projection chart on Debt, card on Overview, hero promise on home
