@@ -105,10 +105,11 @@ export function ImportPanel({ userId, userRules, imports, knownBills, onImported
     const out: string[] = [];
     for (const t of finalTxns) {
       const meta = CLASS_META[t.klass];
-      if (meta?.flag) out.push(`${t.date} · ${t.description} — ${meta.flag}`);
+      if (meta?.signal) out.push(`${t.date} · ${t.description} — ${meta.why}`);
     }
     return out.slice(0, 12);
   }, [finalTxns]);
+
 
   const recurring = useMemo(() => findRecurring(finalTxns), [finalTxns]);
   const recon = useMemo(
