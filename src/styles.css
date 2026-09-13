@@ -37,6 +37,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-solid: var(--destructive-solid);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -76,6 +77,11 @@
 
   --destructive: oklch(0.55 0.18 25);
   --destructive-foreground: oklch(0.98 0.005 85);
+  /* Same value as --destructive: a mid-lightness red already reads fine as
+     both page text (on the near-white page) and as a solid button surface
+     under --destructive-foreground here. Dark mode needs these to diverge
+     -- see the .dark block. */
+  --destructive-solid: oklch(0.55 0.18 25);
 
   --border: oklch(0.88 0.02 85);
   --input: oklch(0.88 0.02 85);
@@ -112,8 +118,20 @@
   --gold: oklch(0.78 0.11 75);
   --gold-foreground: oklch(0.2 0.03 80);
 
+  /* --destructive: tuned to read as body/badge TEXT directly on the very
+     dark page (>=4.5:1 against --background/--card). --destructive-solid:
+     a separate, darker red tuned for use as a SOLID surface under
+     --destructive-foreground (a near-white). One red can't hit 4.5:1 in
+     both roles at once against a near-black page -- white text needs a
+     background luminance no white text on earth can clear if the surface
+     itself is already bright enough to read well on that page. Two tokens,
+     not a compromise value that quietly fails one of the two real uses
+     (badge text at src/components/paycheck-cards.tsx's RiskBadge /
+     PaycheckPlanCard's "Short by" row, and the solid delete button at
+     src/routes/_authenticated/settings.tsx). */
   --destructive: oklch(0.62 0.19 25);
   --destructive-foreground: oklch(0.97 0.01 85);
+  --destructive-solid: oklch(0.4 0.17 25);
 
   --border: oklch(0.32 0.02 160);
   --input: oklch(0.32 0.02 160);
