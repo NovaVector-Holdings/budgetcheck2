@@ -174,6 +174,18 @@ function OverviewPage() {
         </div>
       )}
 
+      <div className="mt-4">
+        <BudgetMethodView
+          method={budgetMethod}
+          input={{
+            income: data?.profile?.monthly_income ?? null,
+            monthExpenses,
+            debts: data?.debts ?? [],
+            monthDeposits,
+          }}
+        />
+      </div>
+
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <section className="paper-card p-6">
           <h2 className="font-serif text-lg text-ink">Coming up</h2>
