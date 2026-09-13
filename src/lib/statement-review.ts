@@ -47,7 +47,7 @@ export interface StatementReview {
 }
 
 const TRANSFER_RE = /venmo|zelle|cash app|cashapp|apple cash|paypal|transfer|wire|withdraw/i;
-const FEE_RE = /overdraft|nsf|insufficient|late fee|service (charge|fee)|maintenance fee|returned item/i;
+const FEE_RE = /overdraft|\\bnsf\\b|insufficient|late fee|service (charge|fee)|maintenance fee|returned item/i;
 
 /** Split a CSV line, respecting simple double-quoted fields. */
 function splitCsvLine(line: string): string[] {
