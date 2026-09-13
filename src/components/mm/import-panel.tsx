@@ -343,12 +343,25 @@ export function ImportPanel({ userId, userRules, imports, knownBills, onImported
           {recurring.length > 0 && (
             <section className="paper-card p-6">
               <h3 className="font-serif text-lg text-ink">Charges that come back every month</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Add any of these to Bills &amp; expenses so they show up in what's owed before your next payday.
+              </p>
               <ul className="mt-3 space-y-1.5">
                 {recurring.slice(0, 12).map((r) => (
-                  <li key={r.key} className="flex items-baseline justify-between gap-3 border-b border-border/60 pb-1.5 text-sm">
+                  <li key={r.key} className="flex flex-wrap items-baseline justify-between gap-3 border-b border-border/60 pb-1.5 text-sm">
                     <span className="text-ink">{r.label}</span>
-                    <span className="text-muted-foreground">
-                      about {fmt(r.typicalAmount)} · seen in {r.monthsSeen} months
+                    <span className="flex items-baseline gap-3">
+                      <span className="text-muted-foreground">
+                        about {fmt(r.typicalAmount)} · seen in {r.monthsSeen} months
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={addBill.isPending}
+                        onClick={() => addBill.mutate({ label: r.label, typicalAmount: r.typicalAmount })}
+                      >
+                        Add as a bill
+                      </Button>
                     </span>
                   </li>
                 ))}
