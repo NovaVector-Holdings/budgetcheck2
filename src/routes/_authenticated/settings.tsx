@@ -79,11 +79,36 @@ function SettingsPage() {
         display_name: name.trim() || null,
         monthly_income: income ? Number(income) : null,
         money_goal: goal.trim() || null,
+        pay_frequency: freq || null,
+        next_pay_date: nextPay || null,
+        // Only meaningful when paid twice a month; cleared otherwise so it can't linger.
+        second_pay_date: freq === "semimonthly" ? secondPay || null : null,
+        income_low_estimate: freq === "irregular" && lowIncome ? Number(lowIncome) : null,
         updated_at: new Date().toISOString(),
       }).eq("id", user.id);
       if (error) throw error;
     },
-    onSuccess: () => toast.success("Profile saved."),
+    onSuccess: () => {
+      toast.success("Profile saved.");
+      qc.invalidateQueries({ queryKey: ["settings", user.id] });
+      qc.invalidateQueries({ queryKey: ["overview", user.id] });
+    },
+    onError: () => toast.error("Couldn't save."),
+  });
+
+  const saveMethod = useMutation({
+    mutationFn: async (next: BudgetMethod) => {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ budget_method: next, updated_at: new Date().toISOString() })
+        .eq("id", user.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Budget method saved.");
+      qc.invalidateQueries({ queryKey: ["settings", user.id] });
+      qc.invalidateQueries({ queryKey: ["overview", user.id] });
+    },
     onError: () => toast.error("Couldn't save."),
   });
 
