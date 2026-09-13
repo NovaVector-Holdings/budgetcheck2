@@ -1,8 +1,25 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { Moon, Sun } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { useTheme } from "@/lib/theme";
+
+function ThemeToggle() {
+  const { resolvedTheme, setTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+  return (
+    <button
+      type="button"
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-ink"
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+    >
+      {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+    </button>
+  );
+}
 
 const learnNav = [
   { to: "/learn", label: "Listen" },
@@ -88,7 +105,8 @@ export function SiteHeader() {
           </Link>
         </nav>
 
-        <div className="hidden shrink-0 items-center md:flex">
+        <div className="hidden shrink-0 items-center gap-1 md:flex">
+          <ThemeToggle />
           {user ? (
             <button
               type="button"
@@ -108,15 +126,18 @@ export function SiteHeader() {
           )}
         </div>
 
-        <button
-          type="button"
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-ink md:hidden"
-          aria-expanded={menuOpen}
-          aria-label={menuOpen ? "Close menu" : "Open menu"}
-          onClick={() => setMenuOpen((v) => !v)}
-        >
-          <span aria-hidden className="text-lg leading-none">{menuOpen ? "✕" : "☰"}</span>
-        </button>
+        <div className="flex shrink-0 items-center gap-1 md:hidden">
+          <ThemeToggle />
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-ink"
+            aria-expanded={menuOpen}
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <span aria-hidden className="text-lg leading-none">{menuOpen ? "✕" : "☰"}</span>
+          </button>
+        </div>
       </div>
 
       {/* Secondary bar: only the pages inside the learning section. */}

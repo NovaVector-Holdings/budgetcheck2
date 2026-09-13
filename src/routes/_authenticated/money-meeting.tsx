@@ -306,6 +306,9 @@ function MoneyMeetingPage() {
           caps={state.caps}
           rules={state.rules}
           overrides={state.overrides.map((o) => ({ id: o.id, label: o.label, tier: o.tier, reason: o.reason }))}
+          expenses={state.expenses.map((e) => ({ id: e.id, name: e.name }))}
+          debts={state.debts.map((d) => ({ id: d.id, name: d.name }))}
+          goals={state.goals.map((g) => ({ id: g.id, name: g.name }))}
         />
       )}
     </div>
