@@ -285,7 +285,7 @@ function AnswerTrustNote({ meta }: { meta: { grounded: boolean; factsUsed: UsedF
             <li key={i} className="flex items-baseline justify-between gap-3">
               <span>
                 {f.label}
-                {f.source === "user_hypothetical" && (
+                {f.source === "derived" && (
                   <span className="ml-1.5 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-ink">
                     hypothetical
                   </span>
