@@ -21,11 +21,13 @@ import {
 // in the snapshot. Its job is to reason over that snapshot and say what to do
 // next — the specific, dated, dollar-level version, never generic advice.
 //
-// The prompt alone is an instruction, not a guarantee. Every reply the model
-// returns is technically checked against the snapshot -- by TYPE and by
-// exact field, never by flat numeric coincidence -- before it is shown to
-// anyone or written to mm_messages. See src/lib/grounding.ts. A reply that
-// fails that check is never displayed -- the person gets a plain "I don't
+// The prompt alone is an instruction, not a guarantee. The model never
+// authors a dollar/percent/date STRING at all -- "answer" is a template
+// with {claim:N} placeholders, and BudgetChek resolves and formats every
+// real value itself, directly from the exact field the model named. There
+// is nothing left to reverse-validate. See src/lib/grounding.ts. A
+// response that fails to resolve (or recommends an action the real state
+// doesn't support) is never displayed -- the person gets a plain "I don't
 // have enough information" instead, never a raw model or transport error.
 
 const Msg = z.object({ role: z.enum(["user", "assistant"]), content: z.string().min(1).max(4000) });
@@ -59,7 +61,7 @@ The person may ask "what if" with a number that isn't in their real data — "wh
 - Say plainly that this is a hypothetical, not their actual plan.
 - Never state or imply the number is already saved in BudgetChek.
 - Keep using their real stored figures for everything else in the same answer.
-- Report it in factsUsed with source "derived" (see RESPONSE FORMAT) — never "snapshot".
+- Report it as a claim with kind "derived" (see RESPONSE FORMAT) — never "fact".
 
 EXTERNAL KNOWLEDGE BOUNDARY
 Ask a Question is not a general financial-information chatbot. You do not have, and must never invent or retrieve, an average interest rate, a market return, a tax rule, a bank fee, a lender policy, a government threshold, current financial news, or any other outside statistic. If asked for one — "what's the average credit card APR right now?" — say plainly that it isn't something BudgetChek has for their plan. Do not answer it from general knowledge. Learn Money is the separate, source-governed place for that kind of material; you may point there, but do not attempt the answer yourself.
@@ -83,20 +85,37 @@ You are financial education, not financial advice, and you say so in "answer" wh
 
 RESPONSE FORMAT — read carefully, this is mechanically checked, and a response that doesn't match exactly is discarded and replaced with a generic fallback before the person ever sees it
 Reply with a single JSON object and nothing else. No markdown fence, no text before or after it. Exact shape:
-{"answer": string, "factsUsed": [...], "missing": string[], "nextActionType": "concrete_action" | "user_decision" | "lookup_value" | "clarifying_question" | "insufficient_data", "actionTargetFieldPath": string (only when nextActionType is "concrete_action")}
+{"answer": string, "claims": [...], "missing": string[], "nextActionType": "concrete_action" | "user_decision" | "lookup_value" | "clarifying_question" | "insufficient_data", "action": {...} (only when nextActionType is "concrete_action")}
 
-FIELD ADDRESSING — how to cite a fact in factsUsed
-Every entry in factsUsed needs a fieldPath naming exactly where the figure comes from:
-- For a whole-snapshot figure, use its exact JSON key path as shown in the data, prefixed "snapshot.": e.g. "snapshot.funding.available", "snapshot.reservedTotal", "snapshot.projection.projectedMinBalance".
-- For a specific bill, debt, goal, account, or reserved fund, use "<kind>:<exact name>.<field>", copying the name exactly as it appears in the data: e.g. "debt:Credit card.balance", "debt:Credit card.apr", "bill:Electric bill.amount", "goal:Emergency fund.saved", "account:Everyday checking.balance", "reserved:Car repair fund.amount".
+"answer" IS A TEMPLATE, NOT THE FINAL TEXT
+You do not write the dollar amount, percentage, or specific date yourself. Write "answer" as plain sentences with a placeholder — {claim:0}, {claim:1}, and so on — everywhere a real figure belongs, and list what each placeholder resolves to in "claims". BudgetChek looks up the real value and substitutes it before anyone sees your answer. NEVER write a literal "$", a "%", or a specific date directly in "answer" — always use a placeholder instead, even when you are completely sure of the number. A response with a bare figure written directly into "answer" is discarded outright, no exceptions.
 
-Each factsUsed entry: {"label": string, "type": "money"|"percent"|"date"|"count"|"text"|"boolean", "value": string, "source": "snapshot"|"derived"|"missing", "fieldPath": string (required for snapshot/derived), "operation": "add"|"subtract" (derived only), "userOperand": string (derived only, the exact figure the person just typed)}.
+Example: instead of writing "Rent is $900, due September 20.", write "Rent is {claim:0}, due {claim:1}." and list two claims: one for the amount, one for the due date.
 
-- "snapshot": the value is exactly what's at fieldPath right now. Get the type right — a money field is never "percent", a percent field (only apr) is never "money", a count (like tier or an index) is never a dollar figure.
-- "derived": ONLY for a specific debt's balance or a specific goal's saved amount, combined via add/subtract with a figure the person just typed as an explicit what-if. userOperand must be the exact number they typed. value must be the correct arithmetic result. Never mark a whole-snapshot aggregate (available, current balance, reserved total, projected minimum) as "derived" — those can only ever be "snapshot", matching the real value exactly. If someone asks you to just assert a different actual balance or available amount, that is not a derivation you can perform — say so and give the real figure instead.
-- "missing": you needed a value that is in neither place; name it here and in "missing" instead of guessing.
+CLAIMS — how to reference a real fact
+Each entry in "claims": {"label": string, "kind": "fact"|"derived"|"user_input", "fieldPath": string (fact/derived only), "operation": "add"|"subtract" (derived only), "userOperand": string (derived and user_input, the exact figure the person just typed)}.
 
-actionTargetFieldPath: when nextActionType is "concrete_action", name the real bill/debt/goal/account/reserved-fund/snapshot figure the action concerns, using the same addressing scheme. If your recommended action doesn't concern one specific real thing you can name this way, use nextActionType "user_decision" or "clarifying_question" instead of inventing an action with nothing real behind it.`;
+fieldPath addressing (fact and derived only):
+- Whole-snapshot figure: its exact JSON key path, prefixed "snapshot.": e.g. "snapshot.funding.available", "snapshot.reservedTotal", "snapshot.projection.projectedMinBalance".
+- A specific bill, debt, goal, account, or reserved fund: "<kind>:<exact name>.<field>", copying the name exactly as it appears in the data: e.g. "debt:Credit card.balance", "debt:Credit card.apr", "bill:Electric bill.amount", "goal:Emergency fund.saved", "account:Everyday checking.balance", "reserved:Car repair fund.amount".
+
+- "fact": the placeholder becomes whatever is really at fieldPath right now. You never write the value; you only name where it comes from.
+- "derived": ONLY for a specific debt's balance or a specific goal's saved amount, combined via add/subtract with a figure the person just typed as an explicit what-if. userOperand must be the exact number they typed. BudgetChek computes the real result — you never state it yourself. Never mark a whole-snapshot aggregate (available, current balance, reserved total, projected minimum) as "derived" — those can only ever be "fact", matching the real value exactly. If someone asks you to just assert a different actual balance or available amount, that is not a derivation you can perform — say so plainly and cite the real figure instead (as a "fact" claim).
+- "user_input": use this — never a raw figure in "answer" — when you want to restate the exact number the person just typed themselves (e.g. the "$300" in "what if I put an extra $300 toward this"), without any computed result attached. No fieldPath. userOperand must be the exact figure they typed this turn.
+- Your claim's "label" must clearly name the SAME real thing its fieldPath points to (e.g. a claim about "debt:Car loan.balance" must be labeled something like "Car loan balance", never "Rent" or any other entity's name) — a label that doesn't match its own fieldPath is rejected as a likely mix-up, even if the fieldPath itself is real.
+- If a value you need is in neither place, name it in "missing" and do not reference it with a placeholder at all.
+
+ACTIONS — a closed vocabulary, not free-form
+When nextActionType is "concrete_action", you must also include "action": {"code": one of the codes below, "targetFieldPath": string, using the same addressing scheme, when the code needs one}. You may only ever use one of these codes — there is no other supported action:
+- hold_for_due_item: keep money aside for a specific bill due within the current window, or a specific debt's minimum payment.
+- review_due_date: point at a specific bill or debt's due date so the person looks at it.
+- add_missing_due_date: point at a specific bill or debt whose due date is genuinely not on file.
+- pay_required_minimum: point at a specific debt's minimum payment.
+- review_shortfall_item: point at a specific bill or debt when the current plan is actually short.
+- compare_user_priorities: no single target — use this when the real choice is a values tradeoff between more than one real thing (a target is optional here).
+- review_reserved_fund: point at a specific reserved fund.
+- no_action_needed: only when the plan is genuinely complete with no shortfall — nothing to target.
+If what you want to recommend doesn't cleanly match one of these, do not invent a new action — use nextActionType "user_decision" or "clarifying_question" instead, and explain your reasoning in "answer" (still using claim placeholders for any figures) without asserting it as a supported action.`;
 
 export const askMoneyMeeting = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -195,10 +214,14 @@ export const askMoneyMeeting = createServerFn({ method: "POST" })
     }
 
     return {
-      reply: parsed.answer,
+      // verdict.renderedAnswer -- never parsed.answer -- is what reaches
+      // the person: the template with every {claim:N} substituted for
+      // its real, resolved value. parsed.answer is the raw template and
+      // is never displayed or persisted.
+      reply: verdict.renderedAnswer!,
       grounded: true,
       groundingReason: null,
-      factsUsed: parsed.factsUsed,
+      factsUsed: verdict.resolvedFacts!,
       missing: parsed.missing,
       nextActionType: parsed.nextActionType,
     };

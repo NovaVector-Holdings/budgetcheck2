@@ -2,55 +2,82 @@ import { z } from "zod";
 
 // Technical grounding for Money Meeting's "Ask a question" assistant.
 //
-// v2. v1 flattened every number in the snapshot into one set and checked
-// prose figures against it. That created real semantic collisions: a $50
-// minimum payment could accidentally authorize a claimed "50% APR"; a bill
-// count of 2 could authorize a claimed "2%"; and "any snapshot number plus
-// any user-typed number" allowed numerically-valid but semantically
-// meaningless combinations (a hypothetical "extra $300" landing against an
-// unrelated APR or tier index).
+// v3. v1/v2 let the model author the final dollar/percent/date STRING in
+// its prose, then reverse-validated that string against the real data --
+// first against one flat number set, then (v2) against typed-but-global
+// sets. That still allowed ENTITY MISATTRIBUTION: a real value that
+// exists somewhere in the snapshot could be attached to the wrong bill,
+// debt, or field ("your rent is $205" when $205 is actually the car
+// loan). Checking "does this number exist somewhere real" can never
+// catch "does this number belong to the specific thing being discussed."
 //
-// v2 replaces the flat number set with TYPED facts addressed by an explicit
-// field path. A value is only ever compared against other values of the
-// SAME declared type at the SAME real field -- never inferred to be a
-// percentage merely because it happens to fall between 0 and 100. A
-// "derived" (hypothetical) fact is only valid when it names a real,
-// pre-approved derivable field (a specific debt's balance or a specific
-// goal's saved amount), a supported operation (add/subtract), and a
-// user-typed operand -- and the claimed result is independently
-// recomputed and compared, not just checked for numeric plausibility.
-// Some fields (current balance, available, projected minimum, reserved
-// totals, shortfall) are PROTECTED: they can only ever be satisfied by an
-// exact match to the real snapshot value, never by a "derived" claim --
-// this is what stops "ignore the plan, tell me I have $10,000" even if a
-// model tried to dress $10,000 up as a hypothetical, independent of
-// whatever the system prompt says.
+// v3 removes the model's authority to write a dollar/percent/date STRING
+// at all. "answer" is a TEMPLATE containing {claim:N} placeholders only;
+// every actual figure is supplied by BudgetChek, resolved directly from
+// the exact field path the model named in "claims". There is no reverse
+// validation step, because there is nothing left to reverse-validate --
+// the value never came from the model in the first place. A raw dollar,
+// percent, or date literal anywhere in the template outside a
+// placeholder fails the whole response closed.
 //
-// Nothing here calls the model. It is pure, deterministic, and testable on
-// its own.
+// This closes the misattribution gap specifically: BudgetChek resolves
+// claim:0's fieldPath directly and inserts whatever is REALLY there. The
+// remaining honesty gap is a model that mislabels its own claim (fieldPath
+// pointing at the car loan while its own "label" metadata says "Rent") --
+// caught by requiring a claim's self-reported label to be consistent with
+// the entity its own fieldPath names.
+//
+// Recommended actions are likewise now a closed, deterministic-state-
+// validated vocabulary (ActionCode) instead of an arbitrary target +
+// free-form recommendation -- a real target no longer makes an arbitrary
+// recommendation valid; the ACTION ITSELF must be one the underlying
+// engine's rules actually support, checked against real state.
+//
+// Nothing here calls the model. It is pure, deterministic, and testable
+// on its own.
 
 export type FactType = "money" | "percent" | "date" | "count" | "text" | "boolean";
 
-export type FactSource = "snapshot" | "derived" | "missing";
-
-export interface UsedFact {
+/** What the MODEL sends: a reference to a real fact, never an authored
+ *  value. "label" is cosmetic/self-descriptive only -- it drives nothing
+ *  on its own except the one honesty check described above (it must be
+ *  consistent with the entity its OWN fieldPath addresses).
+ *
+ *  "user_input" exists so the model can restate a figure the person just
+ *  typed themselves (e.g. the "$300" in "what if I put an extra $300
+ *  toward this debt") WITHOUT writing it as a raw literal -- it carries
+ *  no fieldPath at all, so there is nothing to misattribute and nothing
+ *  protected it could ever touch. Deliberately NOT a blanket "any number
+ *  the model claims the user said is trusted": it is independently
+ *  checked against the actual current message text, same as a derived
+ *  claim's operand. */
+export interface Claim {
   label: string;
-  type: FactType;
-  value: string;
-  source: FactSource;
-  /** Required for "snapshot" and as the base operand for "derived". Exact
-   *  addressing scheme: "snapshot.<dotted.path>" for whole-snapshot
-   *  aggregates (e.g. "snapshot.funding.available"), or
+  kind: "fact" | "derived" | "user_input";
+  /** Required for "fact" and "derived". Absent for "user_input" -- there
+   *  is no real field being addressed, only the person's own just-typed
+   *  figure. Exact addressing scheme: "snapshot.<dotted.path>" for
+   *  whole-snapshot aggregates (e.g. "snapshot.funding.available"), or
    *  "<kind>:<exact entity name>.<field>" for an entity-scoped figure
    *  (e.g. "debt:Credit card.balance", "bill:Electric bill.amount"). */
   fieldPath?: string;
   /** "derived" only: the operation combining the base fieldPath's real
    *  value with a figure the person just typed. */
   operation?: "add" | "subtract";
-  /** "derived" only: the literal number the person typed THIS turn that
-   *  drives the derivation -- never inferred, never carried over from an
-   *  earlier turn. */
+  /** "derived" and "user_input": the literal number the person typed
+   *  THIS turn -- never inferred, never carried over from an earlier
+   *  turn. For "derived" it's the operand combined with the base
+   *  fieldPath; for "user_input" it's the whole of what's being cited. */
   userOperand?: string;
+}
+
+/** What the SERVER resolves and hands to the client for display -- the
+ *  wire shape stays what the round-2 UI already renders, so the "Show
+ *  what this used" panel needed no changes. */
+export interface UsedFact {
+  label: string;
+  value: string;
+  source: "snapshot" | "derived";
 }
 
 export type NextActionType =
@@ -60,29 +87,54 @@ export type NextActionType =
   | "clarifying_question"
   | "insufficient_data";
 
+/** A closed, deterministic-state-validated action vocabulary. The model
+ *  may only ever recommend one of these -- it explains a validated
+ *  action, it does not invent one. A real, resolvable targetFieldPath is
+ *  necessary for most codes but never sufficient on its own; each code's
+ *  own real-state precondition (see validateAction) is what actually
+ *  gates it. */
+export type ActionCode =
+  | "hold_for_due_item"
+  | "review_due_date"
+  | "add_missing_due_date"
+  | "pay_required_minimum"
+  | "review_shortfall_item"
+  | "compare_user_priorities"
+  | "review_reserved_fund"
+  | "no_action_needed";
+
+export interface StructuredAction {
+  code: ActionCode;
+  targetFieldPath?: string;
+}
+
 /** The contract the model must return instead of free-form prose. Strict:
- *  every field is required, every enum is closed. There is no permissive
- *  default anywhere in the schema that parses this shape (see
- *  mm-chat.functions.ts) -- a response that doesn't match this exactly
+ *  every field is required, every enum is closed, no dollar/percent/date
+ *  literal may appear in "answer" outside a {claim:N} placeholder. There
+ *  is no permissive default anywhere in the schema that parses this shape
+ *  (see AskResponseSchema below) -- a response that doesn't match exactly
  *  fails closed rather than being coerced into something that does. */
 export interface AskResponseContract {
   answer: string;
-  factsUsed: UsedFact[];
+  claims: Claim[];
   missing: string[];
   nextActionType: NextActionType;
-  /** Required only when nextActionType is "concrete_action": names the
-   *  real thing the concrete action is about, so an arbitrary
-   *  model-invented action (with nothing real to anchor it) fails closed
-   *  rather than reaching the person as if it were a supported action. */
-  actionTargetFieldPath?: string;
+  /** Required only when nextActionType is "concrete_action". */
+  action?: StructuredAction;
 }
 
 export interface GroundingVerdict {
   grounded: boolean;
   /** Internal diagnostic only. Never shown to the user. */
   reason?: string;
-  /** The specific number/date/percent/field token that failed, if any. */
+  /** The specific literal/field/code token that failed, if any. */
   offendingToken?: string;
+  /** Present only when grounded: true -- the template with every
+   *  {claim:N} substituted for its real, resolved, formatted value. */
+  renderedAnswer?: string;
+  /** Present only when grounded: true -- the resolved claims, in the
+   *  wire shape the client already renders. */
+  resolvedFacts?: UsedFact[];
 }
 
 const EPS = 0.005; // half a cent, to absorb float rounding
@@ -96,11 +148,11 @@ interface FieldMeta {
   /** Can only ever be satisfied by an exact match to the real snapshot
    *  value -- never by a "derived" (hypothetical) claim. */
   protected: boolean;
-  /** May be the base operand of a "derived" fact (money add/subtract with
-   *  a user-typed figure). Deliberately a short, explicit allow-list --
-   *  not "any money field" -- because the realistic hypothetical shapes
-   *  this product supports are "extra payment toward a debt" and "extra
-   *  contribution toward a goal", nothing broader. */
+  /** May be the base operand of a "derived" claim (money add/subtract
+   *  with a user-typed figure). Deliberately a short, explicit allow-list
+   *  -- not "any money field" -- because the realistic hypothetical
+   *  shapes this product supports are "extra payment toward a debt" and
+   *  "extra contribution toward a goal", nothing broader. */
   derivable: boolean;
 }
 
@@ -132,12 +184,18 @@ const SNAPSHOT_PATHS: Record<string, FieldMeta> = {
 
 /** Entity kind -> field -> meta. Entities are addressed by their exact,
  *  real name (e.g. "debt:Credit card.balance") -- the same name string the
- *  model is shown in the snapshot, never a synthetic id it has to guess. */
+ *  model is shown in the snapshot, never a synthetic id it has to guess.
+ *  `due` on debt is new this round: debts have no due-date COLUMN at all
+ *  in the current schema, so it is always sent as null -- a real,
+ *  permanently-missing field, which is exactly what makes
+ *  "add_missing_due_date" meaningfully checkable against a real debt
+ *  today. Filling it in is a separate, not-yet-built product capability. */
 const ENTITY_FIELDS: Record<string, Record<string, FieldMeta>> = {
   debt: {
     balance: { type: "money", protected: false, derivable: true },
     apr: { type: "percent", protected: false, derivable: false },
     minimum: { type: "money", protected: false, derivable: false },
+    due: { type: "date", protected: false, derivable: false },
   },
   bill: {
     amount: { type: "money", protected: false, derivable: false },
@@ -174,6 +232,8 @@ const ENTITY_NAME_FIELD: Record<string, string> = {
   reserved: "label",
 };
 
+const ENTITY_FIELD_PATH_RE = /^(debt|bill|goal|account|reserved):(.+)\.([a-zA-Z]+)$/;
+
 interface Resolved {
   meta: FieldMeta;
   value: unknown;
@@ -191,11 +251,13 @@ function getByDottedPath(root: unknown, dotted: string): unknown {
 /** Resolves a fieldPath string against the REAL parsed payload
  *  ({snapshot, accounts, reserved, caps, bills, debts, goals,
  *  payFrequency, nextPayDate}), returning its declared type/flags and its
- *  actual current value -- or null if the path doesn't address anything
- *  real. This is the only source of truth; nothing is inferred from the
- *  shape of the claimed value. */
+ *  actual current value (which may legitimately be null, e.g. a debt's
+ *  permanently-absent due date) -- or null if the path doesn't address
+ *  anything real at all. This is the only source of truth; nothing is
+ *  inferred from the shape of a claimed value, because claims never
+ *  carry a value to infer from. */
 function resolveFieldPath(fieldPath: string, payload: Record<string, unknown>): Resolved | null {
-  const entityMatch = fieldPath.match(/^(debt|bill|goal|account|reserved):(.+)\.([a-zA-Z]+)$/);
+  const entityMatch = fieldPath.match(ENTITY_FIELD_PATH_RE);
   if (entityMatch) {
     const [, kind, name, field] = entityMatch;
     const meta = ENTITY_FIELDS[kind]?.[field];
@@ -212,11 +274,25 @@ function resolveFieldPath(fieldPath: string, payload: Record<string, unknown>): 
 
   const meta = SNAPSHOT_PATHS[fieldPath];
   if (!meta) return null;
-  const value = fieldPath.startsWith("snapshot.")
-    ? getByDottedPath(payload, fieldPath)
-    : getByDottedPath(payload, fieldPath);
+  const value = getByDottedPath(payload, fieldPath);
   if (value === undefined) return null;
   return { meta, value };
+}
+
+/** The one honesty check a direct-resolution model can't structurally
+ *  rule out: a claim whose OWN label disagrees with the entity its OWN
+ *  fieldPath names (fieldPath -> the car loan, label -> "Rent amount").
+ *  Snapshot-level (non-entity) paths have no cross-entity ambiguity, so
+ *  this only applies to entity-scoped paths. */
+function labelConsistentWithFieldPath(label: string, fieldPath: string): boolean {
+  const m = fieldPath.match(ENTITY_FIELD_PATH_RE);
+  if (!m) return true;
+  const entityName = m[2];
+  return label.toLowerCase().includes(entityName.toLowerCase());
+}
+
+function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
 function moneyClose(a: number, b: number): boolean {
@@ -230,75 +306,6 @@ function parseNumericClaim(value: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// ---------------------------------------------------------------------------
-// Typed value sets, built ONLY from explicitly-typed real fields -- never
-// from a generic "any number in the tree" walk. This is what makes a $50
-// payment structurally unable to authorize a claimed 50% APR: $50 only
-// ever enters the MONEY set, because it was read from a field declared
-// type "money", never from magnitude.
-// ---------------------------------------------------------------------------
-
-function collectTypedValues(payload: Record<string, unknown>): {
-  money: Set<number>;
-  percent: Set<number>;
-  dateStrings: Set<string>;
-} {
-  const money = new Set<number>();
-  const percent = new Set<number>();
-  const dateStrings = new Set<string>();
-
-  const addDate = (iso: unknown) => {
-    if (typeof iso !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return;
-    dateStrings.add(iso);
-    const [y, m, d] = iso.split("-").map(Number);
-    const dt = new Date(Date.UTC(y, m - 1, d));
-    dateStrings.add(
-      dt.toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" }),
-    );
-    dateStrings.add(
-      dt.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }),
-    );
-  };
-  const addMoney = (v: unknown) => {
-    if (typeof v === "number" && Number.isFinite(v)) money.add(round2(v));
-  };
-  const addPercent = (v: unknown) => {
-    if (typeof v === "number" && Number.isFinite(v)) percent.add(round2(v));
-  };
-
-  for (const [path, meta] of Object.entries(SNAPSHOT_PATHS)) {
-    const resolved = resolveFieldPath(path, payload);
-    if (!resolved) continue;
-    if (meta.type === "money") addMoney(resolved.value);
-    if (meta.type === "percent") addPercent(resolved.value);
-    if (meta.type === "date") addDate(resolved.value);
-  }
-
-  for (const [kind, fields] of Object.entries(ENTITY_FIELDS)) {
-    const arr = payload[ENTITY_ARRAY_KEY[kind]];
-    if (!Array.isArray(arr)) continue;
-    const nameField = ENTITY_NAME_FIELD[kind];
-    for (const entity of arr) {
-      if (!entity || typeof entity !== "object") continue;
-      const name = (entity as Record<string, unknown>)[nameField];
-      if (typeof name !== "string") continue;
-      for (const field of Object.keys(fields)) {
-        const resolved = resolveFieldPath(`${kind}:${name}.${field}`, payload);
-        if (!resolved) continue;
-        if (resolved.meta.type === "money") addMoney(resolved.value);
-        if (resolved.meta.type === "percent") addPercent(resolved.value);
-        if (resolved.meta.type === "date") addDate(resolved.value);
-      }
-    }
-  }
-
-  return { money, percent, dateStrings };
-}
-
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
-
 function numbersInText(text: string): number[] {
   const out: number[] = [];
   for (const m of text.matchAll(/-?\d[\d,]*(?:\.\d+)?/g)) {
@@ -308,33 +315,370 @@ function numbersInText(text: string): number[] {
   return out;
 }
 
-function percentsInText(text: string): number[] {
-  const out: number[] = [];
-  for (const m of text.matchAll(/-?\d+(?:\.\d+)?\s?%/g)) out.push(Number.parseFloat(m[0]));
-  return out;
+// ---------------------------------------------------------------------------
+// Formatting -- BudgetChek authors every figure the person sees; the
+// model only ever names which real field to format.
+// ---------------------------------------------------------------------------
+
+function formatMoney(n: number): string {
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
-const MONTHS =
-  "January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec";
-
-function datesInText(text: string): string[] {
-  const found: string[] = [];
-  for (const m of text.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)) found.push(m[0]);
-  const monthRe = new RegExp(`\\b(?:${MONTHS})\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?\\b`, "gi");
-  for (const m of text.matchAll(monthRe)) found.push(m[0]);
-  return found;
+function formatDateLong(iso: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
 }
 
-function dateAllowed(candidate: string, allowed: Set<string>): boolean {
-  const norm = candidate.trim().replace(/(st|nd|rd|th)\b/gi, "");
-  for (const a of allowed) {
-    if (a.replace(/(st|nd|rd|th)\b/gi, "").toLowerCase() === norm.toLowerCase()) return true;
+function formatByType(type: FactType, value: unknown): string {
+  switch (type) {
+    case "money":
+      return formatMoney(value as number);
+    case "percent":
+      return `${value}%`;
+    case "date":
+      return formatDateLong(value as string);
+    case "count":
+      return String(value);
+    case "boolean":
+      return (value as boolean) ? "yes" : "no";
+    case "text":
+      return String(value);
   }
-  return false;
 }
 
 // ---------------------------------------------------------------------------
-// Injection defenses that don't depend on any number being wrong
+// Resolving one claim into its real, formatted value
+// ---------------------------------------------------------------------------
+
+type ClaimResolution =
+  { ok: true; formatted: string } | { ok: false; reason: string; offendingToken?: string };
+
+function resolveClaim(
+  claim: Claim,
+  payload: Record<string, unknown>,
+  currentUserMessage: string,
+): ClaimResolution {
+  if (claim.kind === "user_input") {
+    // No fieldPath at all -- nothing to resolve against real data,
+    // nothing to misattribute, nothing protected it could touch. The
+    // only thing to check is that the person actually typed this exact
+    // figure themselves, this turn.
+    if (!claim.userOperand) {
+      return {
+        ok: false,
+        reason: `user_input claim "${claim.label}" is missing userOperand`,
+        offendingToken: claim.label,
+      };
+    }
+    const n = parseNumericClaim(claim.userOperand);
+    if (n == null || !numbersInText(currentUserMessage).some((u) => moneyClose(u, n))) {
+      return {
+        ok: false,
+        reason: `user_input claim's userOperand "${claim.userOperand}" wasn't literally typed by the user this turn`,
+        offendingToken: claim.userOperand,
+      };
+    }
+    return { ok: true, formatted: formatMoney(round2(n)) };
+  }
+
+  if (!claim.fieldPath) {
+    return {
+      ok: false,
+      reason: `claim "${claim.label}" of kind "${claim.kind}" requires a fieldPath`,
+      offendingToken: claim.label,
+    };
+  }
+  const resolved = resolveFieldPath(claim.fieldPath, payload);
+  if (!resolved) {
+    return {
+      ok: false,
+      reason: `fieldPath "${claim.fieldPath}" does not resolve to anything real`,
+      offendingToken: claim.fieldPath,
+    };
+  }
+  if (!labelConsistentWithFieldPath(claim.label, claim.fieldPath)) {
+    return {
+      ok: false,
+      reason: `claim labeled "${claim.label}" points its fieldPath at a different real entity ("${claim.fieldPath}") -- possible misattribution`,
+      offendingToken: claim.fieldPath,
+    };
+  }
+
+  if (claim.kind === "fact") {
+    if (resolved.value == null) {
+      return {
+        ok: false,
+        reason: `fieldPath "${claim.fieldPath}" has no value on file -- use "missing", not a claim`,
+        offendingToken: claim.fieldPath,
+      };
+    }
+    return { ok: true, formatted: formatByType(resolved.meta.type, resolved.value) };
+  }
+
+  // kind === "derived"
+  if (resolved.meta.protected) {
+    return {
+      ok: false,
+      reason: `fieldPath "${claim.fieldPath}" is a protected current-state field and can never be derived`,
+      offendingToken: claim.fieldPath,
+    };
+  }
+  if (!resolved.meta.derivable) {
+    return {
+      ok: false,
+      reason: `fieldPath "${claim.fieldPath}" is not on the derivable allow-list`,
+      offendingToken: claim.fieldPath,
+    };
+  }
+  if (typeof resolved.value !== "number") {
+    return {
+      ok: false,
+      reason: `fieldPath "${claim.fieldPath}" did not resolve to a number`,
+      offendingToken: claim.fieldPath,
+    };
+  }
+  if (!claim.operation || !claim.userOperand) {
+    return {
+      ok: false,
+      reason: `derived claim "${claim.label}" is missing operation/userOperand`,
+      offendingToken: claim.label,
+    };
+  }
+  const operandNum = parseNumericClaim(claim.userOperand);
+  if (
+    operandNum == null ||
+    !numbersInText(currentUserMessage).some((n) => moneyClose(n, operandNum))
+  ) {
+    return {
+      ok: false,
+      reason: `derived claim's userOperand "${claim.userOperand}" wasn't literally typed by the user this turn`,
+      offendingToken: claim.userOperand,
+    };
+  }
+  const result =
+    claim.operation === "add" ? resolved.value + operandNum : resolved.value - operandNum;
+  return { ok: true, formatted: formatMoney(round2(result)) };
+}
+
+// ---------------------------------------------------------------------------
+// Rendering the answer template
+// ---------------------------------------------------------------------------
+
+const MONTHS =
+  "January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec";
+const MONTH_DATE_RE = new RegExp(`\\b(?:${MONTHS})\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?\\b`, "i");
+
+/** Any raw dollar, percent, or date-shaped literal in the template, once
+ *  every {claim:N} placeholder is stripped out -- i.e. a figure the model
+ *  tried to author itself instead of referencing a claim. */
+function firstRawFigureToken(templateWithoutPlaceholders: string): string | null {
+  const dollar = templateWithoutPlaceholders.match(/\$\s?-?\d[\d,]*(?:\.\d{1,2})?/);
+  if (dollar) return dollar[0];
+  const pct = templateWithoutPlaceholders.match(/-?\d+(?:\.\d+)?\s?%/);
+  if (pct) return pct[0];
+  const iso = templateWithoutPlaceholders.match(/\b\d{4}-\d{2}-\d{2}\b/);
+  if (iso) return iso[0];
+  const monthDate = templateWithoutPlaceholders.match(MONTH_DATE_RE);
+  if (monthDate) return monthDate[0];
+  return null;
+}
+
+const CLAIM_PLACEHOLDER_RE = /\{claim:(\d+)\}/g;
+
+type RenderResult =
+  | { ok: true; rendered: string; resolvedFacts: UsedFact[] }
+  | { ok: false; reason: string; offendingToken?: string };
+
+function renderAnswerTemplate(
+  template: string,
+  claims: Claim[],
+  payload: Record<string, unknown>,
+  currentUserMessage: string,
+): RenderResult {
+  const stripped = template.replace(CLAIM_PLACEHOLDER_RE, "");
+  const rawFigure = firstRawFigureToken(stripped);
+  if (rawFigure) {
+    return {
+      ok: false,
+      reason: "answer contains a literal figure not backed by a {claim:N} placeholder",
+      offendingToken: rawFigure,
+    };
+  }
+
+  const placeholderIndices = [...template.matchAll(CLAIM_PLACEHOLDER_RE)].map((m) => Number(m[1]));
+  for (const idx of placeholderIndices) {
+    if (idx < 0 || idx >= claims.length) {
+      return {
+        ok: false,
+        reason: `answer references {claim:${idx}} which doesn't exist in claims`,
+        offendingToken: `{claim:${idx}}`,
+      };
+    }
+  }
+
+  const formattedByIndex = new Map<number, string>();
+  const resolvedFacts: UsedFact[] = [];
+  for (let i = 0; i < claims.length; i++) {
+    const claim = claims[i];
+    const res = resolveClaim(claim, payload, currentUserMessage);
+    if (!res.ok) return { ok: false, reason: res.reason, offendingToken: res.offendingToken };
+    formattedByIndex.set(i, res.formatted);
+    resolvedFacts.push({
+      label: claim.label,
+      value: res.formatted,
+      source: claim.kind === "derived" ? "derived" : "snapshot",
+    });
+  }
+
+  const rendered = template.replace(
+    CLAIM_PLACEHOLDER_RE,
+    (_full, idxStr: string) => formattedByIndex.get(Number(idxStr)) ?? "",
+  );
+  return { ok: true, rendered, resolvedFacts };
+}
+
+// ---------------------------------------------------------------------------
+// Structured actions -- a closed vocabulary, each validated against real,
+// deterministic state. A real target does not make an arbitrary
+// recommendation valid; the ACTION CODE ITSELF must be one the
+// underlying engine's rules actually support.
+// ---------------------------------------------------------------------------
+
+function isoLte(a: string, b: string): boolean {
+  return a <= b;
+}
+
+function withinWindow(dateIso: string, window: { start: string; end: string }): boolean {
+  return isoLte(window.start, dateIso) && isoLte(dateIso, window.end);
+}
+
+type ActionVerdict = { ok: true } | { ok: false; reason: string };
+
+function fail(reason: string): ActionVerdict {
+  return { ok: false, reason };
+}
+
+function validateAction(action: StructuredAction, payload: Record<string, unknown>): ActionVerdict {
+  const snap = (payload.snapshot ?? {}) as Record<string, unknown>;
+  const funding = (snap.funding ?? null) as { shortfall?: number } | null;
+  const window = (snap.window ?? null) as { start: string; end: string } | null;
+
+  switch (action.code) {
+    case "hold_for_due_item": {
+      if (!action.targetFieldPath) return fail("hold_for_due_item requires a targetFieldPath");
+      const billMatch = action.targetFieldPath.match(/^bill:(.+)\.amount$/);
+      if (billMatch) {
+        const due = resolveFieldPath(`bill:${billMatch[1]}.due`, payload);
+        const amt = resolveFieldPath(action.targetFieldPath, payload);
+        if (!due || !amt || typeof due.value !== "string" || typeof amt.value !== "number") {
+          return fail("hold_for_due_item target bill does not resolve to a real due amount");
+        }
+        if (!window || !withinWindow(due.value, window)) {
+          return fail(
+            "hold_for_due_item target bill is not due within the current planning window",
+          );
+        }
+        return { ok: true };
+      }
+      const debtMinMatch = action.targetFieldPath.match(/^debt:(.+)\.minimum$/);
+      if (debtMinMatch) {
+        const min = resolveFieldPath(action.targetFieldPath, payload);
+        if (!min || typeof min.value !== "number")
+          return fail("hold_for_due_item target debt minimum does not resolve");
+        return { ok: true };
+      }
+      return fail(
+        "hold_for_due_item target must be a real bill amount due in-window, or a real debt minimum",
+      );
+    }
+
+    case "review_due_date": {
+      if (!action.targetFieldPath) return fail("review_due_date requires a targetFieldPath");
+      if (!/^(bill|debt):(.+)\.due$/.test(action.targetFieldPath)) {
+        return fail("review_due_date target must be a bill or debt's due field");
+      }
+      const resolved = resolveFieldPath(action.targetFieldPath, payload);
+      if (!resolved || typeof resolved.value !== "string") {
+        return fail("review_due_date target has no due date on file to review");
+      }
+      return { ok: true };
+    }
+
+    case "add_missing_due_date": {
+      if (!action.targetFieldPath) return fail("add_missing_due_date requires a targetFieldPath");
+      if (!/^(bill|debt):(.+)\.due$/.test(action.targetFieldPath)) {
+        return fail("add_missing_due_date target must be a bill or debt's due field");
+      }
+      const resolved = resolveFieldPath(action.targetFieldPath, payload);
+      if (!resolved) return fail("add_missing_due_date target does not resolve to a real item");
+      if (resolved.value !== null)
+        return fail("add_missing_due_date target already has a due date on file");
+      return { ok: true };
+    }
+
+    case "pay_required_minimum": {
+      if (!action.targetFieldPath) return fail("pay_required_minimum requires a targetFieldPath");
+      if (!/^debt:(.+)\.minimum$/.test(action.targetFieldPath)) {
+        return fail("pay_required_minimum target must be a debt's minimum field");
+      }
+      const resolved = resolveFieldPath(action.targetFieldPath, payload);
+      if (!resolved || typeof resolved.value !== "number") {
+        return fail("pay_required_minimum target does not resolve to a real minimum payment");
+      }
+      return { ok: true };
+    }
+
+    case "review_shortfall_item": {
+      if (!action.targetFieldPath) return fail("review_shortfall_item requires a targetFieldPath");
+      if (!/^(bill:(.+)\.amount|debt:(.+)\.balance)$/.test(action.targetFieldPath)) {
+        return fail("review_shortfall_item target must be a real bill amount or debt balance");
+      }
+      const resolved = resolveFieldPath(action.targetFieldPath, payload);
+      if (!resolved) return fail("review_shortfall_item target does not resolve to anything real");
+      if (typeof funding?.shortfall !== "number" || funding.shortfall <= 0) {
+        return fail("review_shortfall_item requires a real shortfall in the current plan");
+      }
+      return { ok: true };
+    }
+
+    case "compare_user_priorities": {
+      if (action.targetFieldPath && !resolveFieldPath(action.targetFieldPath, payload)) {
+        return fail(
+          "compare_user_priorities targetFieldPath, if given, must resolve to something real",
+        );
+      }
+      return { ok: true };
+    }
+
+    case "review_reserved_fund": {
+      if (!action.targetFieldPath) return fail("review_reserved_fund requires a targetFieldPath");
+      if (!/^reserved:(.+)\.(amount|tapped)$/.test(action.targetFieldPath)) {
+        return fail(
+          "review_reserved_fund target must be a real reserved fund's amount or tapped field",
+        );
+      }
+      if (!resolveFieldPath(action.targetFieldPath, payload)) {
+        return fail("review_reserved_fund target does not resolve to anything real");
+      }
+      return { ok: true };
+    }
+
+    case "no_action_needed": {
+      if (snap.complete !== true)
+        return fail("no_action_needed requires the plan to actually be complete");
+      if (typeof funding?.shortfall === "number" && funding.shortfall > 0) {
+        return fail("no_action_needed requires no real shortfall");
+      }
+      return { ok: true };
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Injection defenses that don't depend on any number being wrong --
+// unchanged from round 2, kept as defense-in-depth (see checkGrounding).
 // ---------------------------------------------------------------------------
 
 export const UNTRUSTED_DATA_START = "BEGIN UNTRUSTED FINANCIAL DATA (JSON)";
@@ -411,19 +755,15 @@ export function answerEchoesInjectedSpan(answer: string, spans: string[]): boole
 /** A second, independent line of defense for the SAME class of attack --
  *  an injected instruction the model complies with in its OWN words,
  *  paraphrased rather than quoted, would slip past answerEchoesInjectedSpan
- *  (which only catches verbatim overlap) and past the actionTargetFieldPath
- *  check below (which only applies when the model honestly self-reports
- *  nextActionType "concrete_action" -- nothing stops it self-reporting
- *  "user_decision" instead while still saying the dangerous thing in
- *  "answer"). This scans the OUTPUT itself for sweeping, absolute
- *  financial directives ("close ALL your accounts", "empty your savings",
- *  "withdraw everything") that the deterministic engine's own rule set
- *  (rank, fund, hold-the-minimum, ask, stress-test framing) never
- *  produces, regardless of whether an injection attempt is even present --
- *  a real backstop, not just an injection-specific patch. Deliberately
- *  scoped to SWEEPING language ("all", "every", "everything") so an
- *  ordinary, legitimate answer about a single named account or bill
- *  ("closing this one card is your call") is never caught by it. */
+ *  (verbatim overlap only). This scans the OUTPUT itself for sweeping,
+ *  absolute financial directives ("close ALL your accounts", "empty your
+ *  savings") that the deterministic engine's own rules never produce --
+ *  kept as defense-in-depth per this round's instruction, NOT as the
+ *  primary action-safety mechanism (that's validateAction() above, which
+ *  gates the structured action against real state; this only screens the
+ *  free-form "answer" prose alongside it). Deliberately scoped to
+ *  SWEEPING language ("all", "every", "everything") so an ordinary answer
+ *  about a single named account or bill is never caught by it. */
 const UNSUPPORTED_DIRECTIVE_PATTERNS = [
   /clos(e|ing)\s+(all|every)\s+(your\s+)?accounts?/i,
   /empty(ing)?\s+(your\s+|the\s+)?(savings|reserved|emergency fund)/i,
@@ -469,12 +809,22 @@ export function checkGrounding(
     return { grounded: false, reason: "snapshot did not parse as JSON" };
   }
 
-  // Defense #1a: sweeping, unsupported financial directives -- catches an
-  // injected instruction the model complied with IN ITS OWN WORDS
-  // (paraphrased, not quoted), which #1b's verbatim-echo check cannot.
-  // Independent of nextActionType, so a model that mislabels this as
-  // "user_decision" instead of "concrete_action" doesn't evade it either.
-  const unsupportedDirective = containsUnsupportedDirective(response.answer);
+  // Defense #1: resolve the template directly from real data. There is no
+  // reverse-validation step -- every figure in the rendered text came
+  // from BudgetChek's own lookup, never from the model.
+  const rendered = renderAnswerTemplate(
+    response.answer,
+    response.claims,
+    payload,
+    ctx.currentUserMessage,
+  );
+  if (!rendered.ok) {
+    return { grounded: false, reason: rendered.reason, offendingToken: rendered.offendingToken };
+  }
+
+  // Defense #2a: sweeping, unsupported financial directives in the
+  // rendered prose (defense-in-depth, not primary -- see comment above).
+  const unsupportedDirective = containsUnsupportedDirective(rendered.rendered);
   if (unsupportedDirective) {
     return {
       grounded: false,
@@ -483,204 +833,32 @@ export function checkGrounding(
     };
   }
 
-  // Defense #1b: qualitative instruction-following via verbatim overlap --
-  // catches novel injected text not covered by the fixed directive list.
-  if (answerEchoesInjectedSpan(response.answer, ctx.injectedSpans)) {
+  // Defense #2b: qualitative instruction-following via verbatim overlap.
+  if (answerEchoesInjectedSpan(rendered.rendered, ctx.injectedSpans)) {
     return { grounded: false, reason: "answer substantially echoes a flagged injected span" };
   }
 
-  const {
-    money: realMoney,
-    percent: realPercent,
-    dateStrings: realDates,
-  } = collectTypedValues(payload);
-  const userNumbers = numbersInText(ctx.currentUserMessage);
-  const derivedMoney = new Set<number>();
-
-  // Defense #2: the structured factsUsed contract, field-path by field-path.
-  for (const fact of response.factsUsed) {
-    if (fact.source === "missing") continue;
-
-    if (fact.source === "snapshot") {
-      if (!fact.fieldPath) {
-        return {
-          grounded: false,
-          reason: `factsUsed "${fact.label}" claims source snapshot with no fieldPath`,
-          offendingToken: fact.label,
-        };
-      }
-      const resolved = resolveFieldPath(fact.fieldPath, payload);
-      if (!resolved) {
-        return {
-          grounded: false,
-          reason: `fieldPath "${fact.fieldPath}" does not resolve to anything real`,
-          offendingToken: fact.fieldPath,
-        };
-      }
-      if (resolved.meta.type !== fact.type) {
-        return {
-          grounded: false,
-          reason: `fieldPath "${fact.fieldPath}" is type ${resolved.meta.type}, factsUsed claims type ${fact.type}`,
-          offendingToken: fact.fieldPath,
-        };
-      }
-      if (!valueMatches(fact.type, fact.value, resolved.value)) {
-        return {
-          grounded: false,
-          reason: `factsUsed "${fact.label}" value "${fact.value}" doesn't match the real value at ${fact.fieldPath}`,
-          offendingToken: fact.value,
-        };
-      }
-      continue;
-    }
-
-    // source === "derived"
-    if (fact.type !== "money") {
-      return {
-        grounded: false,
-        reason: `derived facts are only supported for type money, got ${fact.type}`,
-        offendingToken: fact.label,
-      };
-    }
-    if (!fact.fieldPath || !fact.operation || !fact.userOperand) {
-      return {
-        grounded: false,
-        reason: `derived fact "${fact.label}" is missing fieldPath/operation/userOperand`,
-        offendingToken: fact.label,
-      };
-    }
-    const resolved = resolveFieldPath(fact.fieldPath, payload);
-    if (!resolved) {
-      return {
-        grounded: false,
-        reason: `derived fact's fieldPath "${fact.fieldPath}" does not resolve`,
-        offendingToken: fact.fieldPath,
-      };
-    }
-    if (resolved.meta.protected) {
-      return {
-        grounded: false,
-        reason: `fieldPath "${fact.fieldPath}" is a protected current-state field and can never be derived`,
-        offendingToken: fact.fieldPath,
-      };
-    }
-    if (!resolved.meta.derivable) {
-      return {
-        grounded: false,
-        reason: `fieldPath "${fact.fieldPath}" is not on the derivable allow-list`,
-        offendingToken: fact.fieldPath,
-      };
-    }
-    if (typeof resolved.value !== "number") {
-      return {
-        grounded: false,
-        reason: `fieldPath "${fact.fieldPath}" did not resolve to a number`,
-        offendingToken: fact.fieldPath,
-      };
-    }
-    const userOperandNum = parseNumericClaim(fact.userOperand);
-    if (userOperandNum == null || !userNumbers.some((n) => moneyClose(n, userOperandNum))) {
-      return {
-        grounded: false,
-        reason: `derived fact's userOperand "${fact.userOperand}" wasn't literally typed by the user this turn`,
-        offendingToken: fact.userOperand,
-      };
-    }
-    const expected =
-      fact.operation === "add" ? resolved.value + userOperandNum : resolved.value - userOperandNum;
-    const claimed = parseNumericClaim(fact.value);
-    if (claimed == null || !moneyClose(claimed, expected)) {
-      return {
-        grounded: false,
-        reason: `derived fact "${fact.label}" claims ${fact.value} but ${resolved.value} ${fact.operation} ${userOperandNum} = ${expected}`,
-        offendingToken: fact.value,
-      };
-    }
-    derivedMoney.add(round2(claimed));
-  }
-
-  // Defense #3: scan the free-form answer itself, independent of whether
-  // factsUsed was filled out honestly. Each figure type is checked ONLY
-  // against its own typed set -- a $50 amount can never validate a claimed
-  // 50%, and a bare count can never validate a claimed dollar figure.
-  const allowedMoney = new Set<number>([...realMoney, ...derivedMoney]);
-  for (const raw of response.answer.matchAll(/\$\s?-?\d[\d,]*(?:\.\d{1,2})?/g)) {
-    const n = Number.parseFloat(raw[0].replace(/[$,\s]/g, ""));
-    if (!setHasClose(allowedMoney, n)) {
-      return {
-        grounded: false,
-        reason: "dollar amount not derivable from typed snapshot facts or a validated derivation",
-        offendingToken: raw[0],
-      };
-    }
-  }
-  for (const pct of percentsInText(response.answer)) {
-    if (!setHasClose(realPercent, pct)) {
-      return {
-        grounded: false,
-        reason: "percentage not present in a real percent-typed field",
-        offendingToken: `${pct}%`,
-      };
-    }
-  }
-  for (const dateToken of datesInText(response.answer)) {
-    if (!dateAllowed(dateToken, realDates)) {
-      return {
-        grounded: false,
-        reason: "date not present in a real date-typed field",
-        offendingToken: dateToken,
-      };
-    }
-  }
-
-  // Defense #4: a "concrete_action" must be anchored to something real --
-  // an arbitrary model-invented action with nothing to point at fails
-  // closed rather than reaching the person as a supported recommendation.
+  // Defense #3: the recommended action itself must be a real, deterministic-
+  // state-validated action -- a resolvable target alone is not enough.
   if (response.nextActionType === "concrete_action") {
-    if (!response.actionTargetFieldPath) {
-      return { grounded: false, reason: "concrete_action requires actionTargetFieldPath" };
+    if (!response.action) {
+      return { grounded: false, reason: "concrete_action requires a structured action" };
     }
-    if (!resolveFieldPath(response.actionTargetFieldPath, payload)) {
+    const actionVerdict = validateAction(response.action, payload);
+    if (!actionVerdict.ok) {
       return {
         grounded: false,
-        reason: "actionTargetFieldPath does not resolve to anything real",
-        offendingToken: response.actionTargetFieldPath,
+        reason: actionVerdict.reason,
+        offendingToken: response.action.code,
       };
     }
   }
 
-  return { grounded: true };
-}
-
-function setHasClose(set: Set<number>, n: number): boolean {
-  for (const v of set) if (moneyClose(v, n)) return true;
-  return false;
-}
-
-function valueMatches(type: FactType, claimed: string, real: unknown): boolean {
-  if (type === "money" || type === "percent" || type === "count") {
-    const c = parseNumericClaim(claimed);
-    return c != null && typeof real === "number" && moneyClose(c, real);
-  }
-  if (type === "boolean") {
-    return String(real).toLowerCase() === claimed.trim().toLowerCase();
-  }
-  if (type === "date") {
-    if (typeof real !== "string") return false;
-    return claimed.trim() === real || dateAllowed(claimed, buildDateVariants(real));
-  }
-  // text
-  return typeof real === "string" && real.trim().toLowerCase() === claimed.trim().toLowerCase();
-}
-
-function buildDateVariants(iso: string): Set<string> {
-  const out = new Set<string>([iso]);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return out;
-  const [y, m, d] = iso.split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  out.add(dt.toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" }));
-  out.add(dt.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }));
-  return out;
+  return {
+    grounded: true,
+    renderedAnswer: rendered.rendered,
+    resolvedFacts: rendered.resolvedFacts,
+  };
 }
 
 /** What to show instead of an ungrounded answer. Never exposes model or
@@ -696,27 +874,42 @@ export function safeFallback(missing: string[]): string {
 // ---------------------------------------------------------------------------
 // The strict response contract -- lives here, not in mm-chat.functions.ts,
 // so it is a pure, testable unit like everything else in this module. No
-// .catch(...) anywhere: a malformed factsUsed entry, an invalid enum
-// value, or a missing required field means the WHOLE response fails to
-// parse -- parseContract returns null, and the caller falls straight to
-// the safe fallback. Coercing bad shape into a permissive default (e.g.
-// factsUsed -> []) would let a non-conforming response slip through
-// looking valid, which is exactly what "fail closed" rules out.
+// .catch(...) anywhere: a malformed claim, an invalid enum value, or a
+// missing required field means the WHOLE response fails to parse --
+// parseContract returns null, and the caller falls straight to the safe
+// fallback.
 // ---------------------------------------------------------------------------
 
-const UsedFactSchema = z.object({
+const ACTION_CODES = [
+  "hold_for_due_item",
+  "review_due_date",
+  "add_missing_due_date",
+  "pay_required_minimum",
+  "review_shortfall_item",
+  "compare_user_priorities",
+  "review_reserved_fund",
+  "no_action_needed",
+] as const;
+
+const ClaimSchema = z.object({
   label: z.string().min(1),
-  type: z.enum(["money", "percent", "date", "count", "text", "boolean"]),
-  value: z.string().min(1),
-  source: z.enum(["snapshot", "derived", "missing"]),
+  kind: z.enum(["fact", "derived", "user_input"]),
+  // Required for "fact"/"derived", absent for "user_input" -- enforced
+  // as a cross-field rule in parseContract below, not at the schema
+  // level, so the specific reason is easy to log.
   fieldPath: z.string().min(1).optional(),
   operation: z.enum(["add", "subtract"]).optional(),
   userOperand: z.string().min(1).optional(),
 });
 
+const ActionSchema = z.object({
+  code: z.enum(ACTION_CODES),
+  targetFieldPath: z.string().min(1).optional(),
+});
+
 const AskResponseSchema = z.object({
   answer: z.string().min(1),
-  factsUsed: z.array(UsedFactSchema),
+  claims: z.array(ClaimSchema),
   missing: z.array(z.string()),
   nextActionType: z.enum([
     "concrete_action",
@@ -725,12 +918,12 @@ const AskResponseSchema = z.object({
     "clarifying_question",
     "insufficient_data",
   ]),
-  actionTargetFieldPath: z.string().min(1).optional(),
+  action: ActionSchema.optional(),
 });
 
 /** Parses the model's raw text into the strict contract, or null if it
  *  doesn't conform -- including the cross-field rule that "concrete_action"
- *  requires actionTargetFieldPath. Tolerant of surrounding prose/markdown
+ *  requires a structured action. Tolerant of surrounding prose/markdown
  *  fences around the JSON object (the same brace-extraction
  *  mm-vision.functions.ts already uses), but never tolerant of the shape
  *  once found. */
@@ -741,8 +934,11 @@ export function parseContract(raw: string): AskResponseContract | null {
     const parsed = JSON.parse(match[0]);
     const result = AskResponseSchema.safeParse(parsed);
     if (!result.success) return null;
-    if (result.data.nextActionType === "concrete_action" && !result.data.actionTargetFieldPath)
-      return null;
+    if (result.data.nextActionType === "concrete_action" && !result.data.action) return null;
+    for (const claim of result.data.claims) {
+      if ((claim.kind === "fact" || claim.kind === "derived") && !claim.fieldPath) return null;
+      if (claim.kind === "user_input" && !claim.userOperand) return null;
+    }
     return result.data;
   } catch {
     return null;

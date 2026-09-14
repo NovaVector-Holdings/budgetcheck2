@@ -211,6 +211,12 @@ function MoneyMeetingPage() {
               balance: Number(d.balance),
               apr: d.apr,
               minimum: d.minimum_payment,
+              // Debts have no due-date column at all today -- always
+              // null, honestly reflecting a permanently-missing field
+              // (not "not yet loaded"). This is what makes the
+              // assistant's "add_missing_due_date" action meaningfully
+              // real for a debt: the due date genuinely isn't on file.
+              due: null,
             })),
             goals: state.goals.map((g) => ({
               name: g.name,
