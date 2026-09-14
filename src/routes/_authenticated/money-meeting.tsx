@@ -20,9 +20,17 @@ export const Route = createFileRoute("/_authenticated/money-meeting")({
   head: () => ({
     meta: [
       { title: "Money meeting — BudgetChek" },
-      { name: "description", content: "A short weekly check-in, a fuller monthly review, and a place to ask questions about your own numbers." },
+      {
+        name: "description",
+        content:
+          "A short weekly check-in, a fuller monthly review, and a place to ask questions about your own numbers.",
+      },
       { property: "og:title", content: "Money meeting — BudgetChek" },
-      { property: "og:description", content: "A short weekly check-in, a fuller monthly review, and a place to ask questions about your own numbers." },
+      {
+        property: "og:description",
+        content:
+          "A short weekly check-in, a fuller monthly review, and a place to ask questions about your own numbers.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],
@@ -105,7 +113,9 @@ function MoneyMeetingPage() {
             type="button"
             onClick={() => setTab(t.key)}
             className={`rounded-lg px-3.5 py-1.5 text-sm transition-colors ${
-              tab === t.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-ink"
+              tab === t.key
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-ink"
             }`}
           >
             {t.nav}
@@ -121,21 +131,33 @@ function MoneyMeetingPage() {
           {snap.projection && snap.window && (
             <p className="mt-2 text-sm text-muted-foreground">
               Between today and {formatDay(snap.window.end)} you're projected to have{" "}
-              <span className="font-medium text-ink">{fmt(snap.projection.projectedMinBalance)}</span> at your lowest point
-              {snap.reservedTotal > 0 ? `, with ${fmt(snap.reservedTotal)} held back and not counted` : ""}.
+              <span className="font-medium text-ink">
+                {fmt(snap.projection.projectedMinBalance)}
+              </span>{" "}
+              at your lowest point
+              {snap.reservedTotal > 0
+                ? `, with ${fmt(snap.reservedTotal)} held back and not counted`
+                : ""}
+              .
             </p>
           )}
           {snap.missing.length > 0 && (
             <p className="mt-2 text-sm text-muted-foreground">
               Still needed: {snap.missing.map((m) => m.label.toLowerCase()).join(", ")}.{" "}
-              <button type="button" className="underline hover:text-ink" onClick={() => setTab("data")}>
+              <button
+                type="button"
+                className="underline hover:text-ink"
+                onClick={() => setTab("data")}
+              >
                 Add it now
               </button>
             </p>
           )}
           {snap.rebuilds.length > 0 && (
             <ul className="mt-2 space-y-1 text-sm text-ink">
-              {snap.rebuilds.map((r, i) => <li key={i}>{r.reason}</li>)}
+              {snap.rebuilds.map((r, i) => (
+                <li key={i}>{r.reason}</li>
+              ))}
             </ul>
           )}
         </div>
@@ -158,19 +180,45 @@ function MoneyMeetingPage() {
         <Assistant
           userId={user.id}
           snapshot={snap}
+          // Only what the assistant's supported question types actually need.
+          // `budgetMethod` (a display label the engine never consumes) and
+          // `latestStatement` (a period + row count with no line-item value,
+          // and Statements already has its own dedicated view) were sent
+          // before purely because they were available -- removed. See the
+          // PR description's data-flow map for the full field-by-field call.
           context={{
-            accounts: state.accounts.map((a) => ({ name: a.name, kind: a.kind, balance: Number(a.current_balance), limit: a.credit_limit })),
-            reserved: state.reserved.map((r) => ({ label: r.label, amount: Number(r.amount), tapped: Number(r.tapped_amount), purpose: r.purpose })),
+            accounts: state.accounts.map((a) => ({
+              name: a.name,
+              kind: a.kind,
+              balance: Number(a.current_balance),
+              limit: a.credit_limit,
+            })),
+            reserved: state.reserved.map((r) => ({
+              label: r.label,
+              amount: Number(r.amount),
+              tapped: Number(r.tapped_amount),
+              purpose: r.purpose,
+            })),
             caps: state.caps.map((c) => ({ category: c.category, cap: Number(c.cap_amount) })),
-            bills: state.expenses.map((e) => ({ name: e.name, amount: Number(e.amount), due: e.due_date, paid: e.paid })),
-            debts: state.debts.map((d) => ({ name: d.name, balance: Number(d.balance), apr: d.apr, minimum: d.minimum_payment })),
-            goals: state.goals.map((g) => ({ name: g.name, target: Number(g.target_amount), saved: state.savedByGoal.get(g.id) ?? 0 })),
+            bills: state.expenses.map((e) => ({
+              name: e.name,
+              amount: Number(e.amount),
+              due: e.due_date,
+              paid: e.paid,
+            })),
+            debts: state.debts.map((d) => ({
+              name: d.name,
+              balance: Number(d.balance),
+              apr: d.apr,
+              minimum: d.minimum_payment,
+            })),
+            goals: state.goals.map((g) => ({
+              name: g.name,
+              target: Number(g.target_amount),
+              saved: state.savedByGoal.get(g.id) ?? 0,
+            })),
             payFrequency: state.profile?.pay_frequency ?? null,
             nextPayDate: state.profile?.next_pay_date ?? null,
-            budgetMethod: state.profile?.budget_method ?? null,
-            latestStatement: state.imports[0]
-              ? { period: [state.imports[0].period_start, state.imports[0].period_end], rows: state.imports[0].txn_count }
-              : null,
           }}
         />
       )}
@@ -208,7 +256,12 @@ function MoneyMeetingPage() {
           reserved={state.reserved}
           caps={state.caps}
           rules={state.rules}
-          overrides={state.overrides.map((o) => ({ id: o.id, label: o.label, tier: o.tier, reason: o.reason }))}
+          overrides={state.overrides.map((o) => ({
+            id: o.id,
+            label: o.label,
+            tier: o.tier,
+            reason: o.reason,
+          }))}
           expenses={state.expenses.map((e) => ({ id: e.id, name: e.name }))}
           debts={state.debts.map((d) => ({ id: d.id, name: d.name }))}
           goals={state.goals.map((g) => ({ id: g.id, name: g.name }))}
