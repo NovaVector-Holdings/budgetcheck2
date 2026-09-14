@@ -22,15 +22,20 @@ export interface RecommendArgs {
 /**
  * Final rule table (top match wins, one lesson, never more than one):
  *
- * | # | Condition                                    | Lesson              |
- * |---|-----------------------------------------------|----------------------|
- * | 1 | Shortfall this cycle                          | budget-basics        |
- * | 2 | Starter emergency-fund goal < 50% funded      | emergency-fund        |
- * | 3 | A debt at/above HIGH_APR (15%)                | investing-roadmap    |
- * | 4 | None of the above                             | credit-score (default) |
+ * | # | Condition                                | Lesson            |
+ * |---|--------------------------------------------|--------------------|
+ * | 1 | Shortfall this cycle                       | budget-basics      |
+ * | 2 | Starter emergency-fund goal < 50% funded   | emergency-fund     |
+ * | 3 | A debt at/above HIGH_APR (15%)              | investing-roadmap  |
+ * | 4 | None of the above                          | no recommendation (returns null) |
  *
- * A spending-cap/instrument-limit structural gap does NOT appear in this
- * table on purpose -- see the comment at that removed branch below.
+ * No generic default lesson. A spending-cap/instrument-limit structural gap
+ * does NOT appear in this table on purpose -- see the comment further down.
+ * Per the CEO's ruling: forcing a lesson onto a state with no genuinely
+ * relevant match is worse than showing none, and that applies to the
+ * no-signal case too, not just the removed spending-cap branch. Callers
+ * already render the recommendation conditionally, so null needs no
+ * placeholder.
  */
 
 /**
@@ -77,6 +82,7 @@ export function recommendLesson(args: RecommendArgs): { lesson: Lesson; because:
     }
   }
 
-  const lesson = byId("credit-score");
-  return lesson ? { lesson, because: "A steady week is a good week to build a habit, not just react to one." } : null;
+  // No meaningful signal matched -- no forced default. See the doc comment
+  // above the rule table.
+  return null;
 }
