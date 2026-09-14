@@ -92,13 +92,16 @@ export type NextActionType =
  *  action, it does not invent one. A real, resolvable targetFieldPath is
  *  necessary for most codes but never sufficient on its own; each code's
  *  own real-state precondition (see validateAction) is what actually
- *  gates it. */
+ *  gates it. There is deliberately no code meaning "skip", "ignore", or
+ *  "pay late" -- that is the permanent responsible-obligation guardrail,
+ *  enforced structurally by the vocabulary simply not containing one. */
 export type ActionCode =
   | "hold_for_due_item"
   | "review_due_date"
   | "add_missing_due_date"
   | "pay_required_minimum"
   | "review_shortfall_item"
+  | "review_obligation_options"
   | "compare_user_priorities"
   | "review_reserved_fund"
   | "no_action_needed";
@@ -106,6 +109,34 @@ export type ActionCode =
 export interface StructuredAction {
   code: ActionCode;
   targetFieldPath?: string;
+}
+
+/** A closed vocabulary for genuine values/tradeoff decisions -- the same
+ *  "no unsupported directive in the vocabulary" principle as ActionCode,
+ *  applied to nextActionType "user_decision". Before this round,
+ *  "user_decision" carried no structure at all and was a real bypass:
+ *  an unsupported recommendation ("skip rent, put it toward the Visa")
+ *  became valid merely by being labeled a decision instead of an action.
+ *  There is deliberately no code for skipping, ignoring, or deferring a
+ *  real obligation -- a genuine preference belongs to the person, but it
+ *  is always a choice BETWEEN things BudgetChek actually supports, never
+ *  a directive to not meet a known responsibility. */
+export type DecisionCode =
+  | "prioritize_goal"
+  | "prioritize_extra_debt_payment"
+  | "preserve_additional_buffer"
+  | "defer_discretionary_goal"
+  | "compare_real_priorities";
+
+export interface DecisionOption {
+  code: DecisionCode;
+  targetFieldPath?: string;
+}
+
+/** Required when nextActionType is "user_decision" -- at least two real
+ *  options, because a "decision" with fewer than two isn't a choice. */
+export interface StructuredDecision {
+  options: DecisionOption[];
 }
 
 /** The contract the model must return instead of free-form prose. Strict:
@@ -121,6 +152,8 @@ export interface AskResponseContract {
   nextActionType: NextActionType;
   /** Required only when nextActionType is "concrete_action". */
   action?: StructuredAction;
+  /** Required only when nextActionType is "user_decision". */
+  decision?: StructuredDecision;
 }
 
 export interface GroundingVerdict {
@@ -157,6 +190,7 @@ interface FieldMeta {
 }
 
 const SNAPSHOT_PATHS: Record<string, FieldMeta> = {
+  "snapshot.complete": { type: "boolean", protected: false, derivable: false },
   "snapshot.todayIso": { type: "date", protected: false, derivable: false },
   "snapshot.window.start": { type: "date", protected: false, derivable: false },
   "snapshot.window.end": { type: "date", protected: false, derivable: false },
@@ -584,13 +618,28 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
       }
       const debtMinMatch = action.targetFieldPath.match(/^debt:(.+)\.minimum$/);
       if (debtMinMatch) {
+        // A known minimum amount does not prove it's due before the next
+        // paycheck -- BudgetChek does not guess debt timing. Require a
+        // real, in-window due date, same standard as a bill.
         const min = resolveFieldPath(action.targetFieldPath, payload);
-        if (!min || typeof min.value !== "number")
+        const due = resolveFieldPath(`debt:${debtMinMatch[1]}.due`, payload);
+        if (!min || typeof min.value !== "number") {
           return fail("hold_for_due_item target debt minimum does not resolve");
+        }
+        if (!due || typeof due.value !== "string") {
+          return fail(
+            "hold_for_due_item target debt has no due date on file -- BudgetChek does not guess debt timing",
+          );
+        }
+        if (!window || !withinWindow(due.value, window)) {
+          return fail(
+            "hold_for_due_item target debt's due date is not within the current planning window",
+          );
+        }
         return { ok: true };
       }
       return fail(
-        "hold_for_due_item target must be a real bill amount due in-window, or a real debt minimum",
+        "hold_for_due_item target must be a real bill amount due in-window, or a real debt minimum due in-window",
       );
     }
 
@@ -620,12 +669,26 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
 
     case "pay_required_minimum": {
       if (!action.targetFieldPath) return fail("pay_required_minimum requires a targetFieldPath");
-      if (!/^debt:(.+)\.minimum$/.test(action.targetFieldPath)) {
+      const m = action.targetFieldPath.match(/^debt:(.+)\.minimum$/);
+      if (!m) {
         return fail("pay_required_minimum target must be a debt's minimum field");
       }
       const resolved = resolveFieldPath(action.targetFieldPath, payload);
       if (!resolved || typeof resolved.value !== "number") {
         return fail("pay_required_minimum target does not resolve to a real minimum payment");
+      }
+      // A known minimum amount does not prove it's due before the next
+      // paycheck -- BudgetChek does not guess debt timing.
+      const due = resolveFieldPath(`debt:${m[1]}.due`, payload);
+      if (!due || typeof due.value !== "string") {
+        return fail(
+          "pay_required_minimum requires a real due date on file for this debt -- BudgetChek does not guess debt timing",
+        );
+      }
+      if (!window || !withinWindow(due.value, window)) {
+        return fail(
+          "pay_required_minimum target's due date is not within the current planning window",
+        );
       }
       return { ok: true };
     }
@@ -639,6 +702,32 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
       if (!resolved) return fail("review_shortfall_item target does not resolve to anything real");
       if (typeof funding?.shortfall !== "number" || funding.shortfall <= 0) {
         return fail("review_shortfall_item requires a real shortfall in the current plan");
+      }
+      return { ok: true };
+    }
+
+    case "review_obligation_options": {
+      // "BudgetChek has identified a real obligation that cannot
+      // currently be covered and is directing the user to review it
+      // before the due date" -- never "skip it". Same real-shortfall
+      // precondition as review_shortfall_item; a distinct code so the
+      // system prompt can teach the "review before due date, consider
+      // contacting the provider" framing specifically, without implying
+      // nonpayment is ever the supported resolution.
+      if (!action.targetFieldPath)
+        return fail("review_obligation_options requires a targetFieldPath");
+      if (
+        !/^(bill:(.+)\.amount|debt:(.+)\.balance|debt:(.+)\.minimum)$/.test(action.targetFieldPath)
+      ) {
+        return fail(
+          "review_obligation_options target must be a real bill amount or debt balance/minimum",
+        );
+      }
+      const resolved = resolveFieldPath(action.targetFieldPath, payload);
+      if (!resolved)
+        return fail("review_obligation_options target does not resolve to anything real");
+      if (typeof funding?.shortfall !== "number" || funding.shortfall <= 0) {
+        return fail("review_obligation_options requires a real shortfall in the current plan");
       }
       return { ok: true };
     }
@@ -674,6 +763,73 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
       return { ok: true };
     }
   }
+}
+
+/** A structured decision, one option at a time. Each option must
+ *  reference a real entity where the code needs one, and be valid
+ *  against real state -- the same "closed vocabulary + real-state
+ *  precondition" standard as validateAction, applied to genuine
+ *  preference/tradeoff decisions rather than directives. There is no
+ *  code here that means "don't pay" anything -- that's the point. */
+function validateDecisionOption(
+  option: DecisionOption,
+  payload: Record<string, unknown>,
+): ActionVerdict {
+  switch (option.code) {
+    case "prioritize_goal":
+    case "defer_discretionary_goal": {
+      if (!option.targetFieldPath || !/^goal:(.+)\.(target|saved)$/.test(option.targetFieldPath)) {
+        return fail(`${option.code} requires a targetFieldPath naming a real goal`);
+      }
+      if (!resolveFieldPath(option.targetFieldPath, payload)) {
+        return fail(`${option.code} target does not resolve to anything real`);
+      }
+      return { ok: true };
+    }
+    case "prioritize_extra_debt_payment": {
+      if (!option.targetFieldPath || !/^debt:(.+)\.balance$/.test(option.targetFieldPath)) {
+        return fail(
+          "prioritize_extra_debt_payment requires a targetFieldPath naming a real debt's balance",
+        );
+      }
+      if (!resolveFieldPath(option.targetFieldPath, payload)) {
+        return fail("prioritize_extra_debt_payment target does not resolve to anything real");
+      }
+      return { ok: true };
+    }
+    case "preserve_additional_buffer": {
+      if (option.targetFieldPath && !resolveFieldPath(option.targetFieldPath, payload)) {
+        return fail(
+          "preserve_additional_buffer targetFieldPath, if given, must resolve to something real",
+        );
+      }
+      return { ok: true };
+    }
+    case "compare_real_priorities": {
+      if (option.targetFieldPath && !resolveFieldPath(option.targetFieldPath, payload)) {
+        return fail(
+          "compare_real_priorities targetFieldPath, if given, must resolve to something real",
+        );
+      }
+      return { ok: true };
+    }
+  }
+}
+
+function validateDecision(
+  decision: StructuredDecision,
+  payload: Record<string, unknown>,
+): ActionVerdict {
+  if (!Array.isArray(decision.options) || decision.options.length < 2) {
+    return fail(
+      "a structured decision requires at least two real options -- that's what makes it a choice",
+    );
+  }
+  for (const option of decision.options) {
+    const verdict = validateDecisionOption(option, payload);
+    if (!verdict.ok) return verdict;
+  }
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -772,12 +928,109 @@ const UNSUPPORTED_DIRECTIVE_PATTERNS = [
   /cancel(l?ing)?\s+(all|every)\s+(your\s+)?(bills?|payments?|autopay)/i,
   /stop paying (all|everything|your bills)/i,
   /take (all|everything) out of/i,
+
+  // The permanent responsible-obligation guardrail (defense-in-depth --
+  // the PRIMARY defense is that neither ActionCode nor DecisionCode
+  // contains anything meaning "skip"/"ignore"/"pay late"; this net
+  // catches the same intent slipping into free prose instead).
+  // BudgetChek must never originate, normalize, or recommend
+  // intentionally missing, ignoring, abandoning, or making late a known
+  // financial responsibility merely to make a plan appear workable.
+  /\bskip\s+(your\s+|the\s+)?(rent|mortgage|payment|bill|premium|minimum)/i,
+  /\bdon'?t\s+pay\s+(the\s+|your\s+)?\w/i,
+  /\bignore\s+(the\s+|your\s+|a\s+|an\s+|any\s+)?(\S+\s+){0,5}(bills?|payments?|invoices?|taxe?s?|obligations?|debts?|responsibilit(y|ies))\b/i,
+  /\b(let|allow)\s+.{0,30}\b(go\s+late|become\s+late|go\s+delinquent|lapse)\b/i,
+  /\bstop\s+paying\s+(your\s+|the\s+)?(insurance|premium|rent|mortgage)/i,
+  /\bjust\s+(don'?t\s+|do\s+not\s+|not\s+)pay\b/i,
+  /\buse\s+(the\s+|your\s+)?(rent|mortgage|insurance)\s+money\s+(for|toward)/i,
+  /\b(intentionally|deliberately)\s+miss(ing)?\s+(the\s+|your\s+)?(required\s+)?(minimum\s+)?payment/i,
+  /\babandon(ing)?\s+(the\s+|your\s+)?(payment|obligation|bill|responsibility)/i,
+  // Endorsing lateness/skipping in BudgetChek's own voice, rather than
+  // just acknowledging it as the person's own stated choice.
+  /\b(paying|being|going)\s+\S+\s+late\s+(is|would be)\s+(the\s+)?(best|right|smart|good)\s+(move|choice|idea|option)/i,
+  /\bgo\s+ahead\s+and\s+skip\b/i,
 ];
 
 export function containsUnsupportedDirective(answer: string): string | null {
   for (const pattern of UNSUPPORTED_DIRECTIVE_PATTERNS) {
     const m = answer.match(pattern);
     if (m) return m[0];
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Qualitative / state-claim grounding -- the numeric grounding above only
+// scans for $/%/date-shaped tokens, so a claim with no financial figure
+// at all ("Rent is already paid", "you have five bills") could bypass it
+// entirely regardless of whether the model bothered to route it through a
+// claim. These two checks run on the rendered text directly, keyed to the
+// REAL entity names and counts in the payload -- not a generic phrase
+// list -- so they stay structural rather than becoming a bigger regex.
+// ---------------------------------------------------------------------------
+
+/** For every real bill, checks whether the rendered text asserts a
+ *  paid/unpaid state for it by name, and if so, that the assertion
+ *  matches the real `paid` value. Scoped to bills (the only entity with
+ *  a real `paid` field today). */
+function checkPaidStateClaims(rendered: string, payload: Record<string, unknown>): string | null {
+  const bills = payload.bills;
+  if (!Array.isArray(bills)) return null;
+  for (const b of bills) {
+    if (!b || typeof b !== "object") continue;
+    const name = (b as Record<string, unknown>).name;
+    const paid = (b as Record<string, unknown>).paid;
+    if (typeof name !== "string" || typeof paid !== "boolean") continue;
+    const nameEsc = escapeRegex(name);
+    const paidRe = new RegExp(
+      `\\b${nameEsc}\\b[^.!?]{0,60}\\b(is|was|has been)\\b[^.!?]{0,20}\\b(already\\s+)?paid\\b`,
+      "i",
+    );
+    const unpaidRe = new RegExp(
+      `\\b${nameEsc}\\b[^.!?]{0,60}\\b(is|was|remains|still)\\b[^.!?]{0,20}\\b(unpaid|not\\s+paid|still\\s+due|still\\s+owed|outstanding)\\b`,
+      "i",
+    );
+    if (paidRe.test(rendered) && paid !== true) {
+      return `answer states "${name}" is paid, but it is not marked paid`;
+    }
+    if (unpaidRe.test(rendered) && paid !== false) {
+      return `answer states "${name}" is unpaid, but it is marked paid`;
+    }
+  }
+  return null;
+}
+
+const COUNT_WORDS: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+};
+const ENTITY_COUNT_RE =
+  /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(bills?|debts?|goals?)\b/gi;
+
+/** Checks any "N bills"/"N debts"/"N goals" assertion in the rendered
+ *  text against the REAL count of that entity type in the payload. */
+function checkEntityCountClaims(rendered: string, payload: Record<string, unknown>): string | null {
+  const counts: Record<string, number> = {
+    bill: Array.isArray(payload.bills) ? payload.bills.length : 0,
+    debt: Array.isArray(payload.debts) ? payload.debts.length : 0,
+    goal: Array.isArray(payload.goals) ? payload.goals.length : 0,
+  };
+  for (const m of rendered.matchAll(ENTITY_COUNT_RE)) {
+    const raw = m[1].toLowerCase();
+    const claimed = /^\d+$/.test(raw) ? Number(raw) : COUNT_WORDS[raw];
+    const kind = m[2].toLowerCase().replace(/s$/, "");
+    const real = counts[kind];
+    if (claimed !== real) {
+      return `answer claims "${m[0]}", but there are really ${real} ${kind}(s) on file`;
+    }
   }
   return null;
 }
@@ -838,6 +1091,20 @@ export function checkGrounding(
     return { grounded: false, reason: "answer substantially echoes a flagged injected span" };
   }
 
+  // Defense #2c/#2d: qualitative STATE claims -- paid/unpaid and entity
+  // counts -- checked directly against the real payload, independent of
+  // whether the model routed them through a claim placeholder at all
+  // (neither contains a $/%/date token, so the raw-figure ban alone
+  // can't catch a fabricated one).
+  const paidStateProblem = checkPaidStateClaims(rendered.rendered, payload);
+  if (paidStateProblem) {
+    return { grounded: false, reason: paidStateProblem };
+  }
+  const countProblem = checkEntityCountClaims(rendered.rendered, payload);
+  if (countProblem) {
+    return { grounded: false, reason: countProblem };
+  }
+
   // Defense #3: the recommended action itself must be a real, deterministic-
   // state-validated action -- a resolvable target alone is not enough.
   if (response.nextActionType === "concrete_action") {
@@ -851,6 +1118,19 @@ export function checkGrounding(
         reason: actionVerdict.reason,
         offendingToken: response.action.code,
       };
+    }
+  }
+
+  // Defense #4: close the user_decision bypass -- a "decision" is only
+  // ever a validated choice BETWEEN real, closed-vocabulary options,
+  // never an unsupported directive wearing a different nextActionType.
+  if (response.nextActionType === "user_decision") {
+    if (!response.decision) {
+      return { grounded: false, reason: "user_decision requires a structured decision" };
+    }
+    const decisionVerdict = validateDecision(response.decision, payload);
+    if (!decisionVerdict.ok) {
+      return { grounded: false, reason: decisionVerdict.reason };
     }
   }
 
@@ -886,9 +1166,18 @@ const ACTION_CODES = [
   "add_missing_due_date",
   "pay_required_minimum",
   "review_shortfall_item",
+  "review_obligation_options",
   "compare_user_priorities",
   "review_reserved_fund",
   "no_action_needed",
+] as const;
+
+const DECISION_CODES = [
+  "prioritize_goal",
+  "prioritize_extra_debt_payment",
+  "preserve_additional_buffer",
+  "defer_discretionary_goal",
+  "compare_real_priorities",
 ] as const;
 
 const ClaimSchema = z.object({
@@ -907,6 +1196,15 @@ const ActionSchema = z.object({
   targetFieldPath: z.string().min(1).optional(),
 });
 
+const DecisionOptionSchema = z.object({
+  code: z.enum(DECISION_CODES),
+  targetFieldPath: z.string().min(1).optional(),
+});
+
+const DecisionSchema = z.object({
+  options: z.array(DecisionOptionSchema),
+});
+
 const AskResponseSchema = z.object({
   answer: z.string().min(1),
   claims: z.array(ClaimSchema),
@@ -919,14 +1217,18 @@ const AskResponseSchema = z.object({
     "insufficient_data",
   ]),
   action: ActionSchema.optional(),
+  decision: DecisionSchema.optional(),
 });
 
 /** Parses the model's raw text into the strict contract, or null if it
- *  doesn't conform -- including the cross-field rule that "concrete_action"
- *  requires a structured action. Tolerant of surrounding prose/markdown
- *  fences around the JSON object (the same brace-extraction
- *  mm-vision.functions.ts already uses), but never tolerant of the shape
- *  once found. */
+ *  doesn't conform -- including the cross-field rules that
+ *  "concrete_action" requires a structured action and "user_decision"
+ *  requires a structured decision with at least two options (closing the
+ *  bypass where an unsupported recommendation became valid merely by
+ *  being labeled a decision instead of an action). Tolerant of
+ *  surrounding prose/markdown fences around the JSON object (the same
+ *  brace-extraction mm-vision.functions.ts already uses), but never
+ *  tolerant of the shape once found. */
 export function parseContract(raw: string): AskResponseContract | null {
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) return null;
@@ -935,6 +1237,12 @@ export function parseContract(raw: string): AskResponseContract | null {
     const result = AskResponseSchema.safeParse(parsed);
     if (!result.success) return null;
     if (result.data.nextActionType === "concrete_action" && !result.data.action) return null;
+    if (
+      result.data.nextActionType === "user_decision" &&
+      (!result.data.decision || result.data.decision.options.length < 2)
+    ) {
+      return null;
+    }
     for (const claim of result.data.claims) {
       if ((claim.kind === "fact" || claim.kind === "derived") && !claim.fieldPath) return null;
       if (claim.kind === "user_input" && !claim.userOperand) return null;
