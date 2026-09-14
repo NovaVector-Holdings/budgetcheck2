@@ -162,7 +162,7 @@ export const helpResources: Resource[] = [
     title: "Find free tax prep (VITA / TCE)",
     url: "https://www.irs.gov/individuals/free-tax-return-preparation-for-qualifying-taxpayers",
     source: "Internal Revenue Service",
-    why: "IRS locator for free, in-person tax help for households earning under the IRS threshold.",
+    why: "Free in-person tax prep through VITA and TCE. VITA generally serves lower- and moderate-income and other qualifying taxpayers; TCE focuses on taxpayers age 60+.",
     free: true,
     format: "Tool",
   },

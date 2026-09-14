@@ -16,6 +16,10 @@ dist-ssr
 .nitro
 *.local
 
+# This repo has never committed a lockfile; keep that intentional rather
+# than letting one get tracked by accident from a future `npm install`.
+package-lock.json
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars

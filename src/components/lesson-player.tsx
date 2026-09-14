@@ -99,15 +99,29 @@ export function LessonPlayer({ lesson }: { lesson: Lesson }) {
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-        <a
-          href={lesson.sourceUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
-        >
-          <ExternalLink className="h-3.5 w-3.5" />
-          Source: {lesson.source}
-        </a>
+        <div className="flex flex-col gap-1">
+          <a
+            href={lesson.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Source: {lesson.source}
+          </a>
+          {lesson.additionalSources?.map((s) => (
+            <a
+              key={s.sourceUrl}
+              href={s.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Source: {s.source}
+            </a>
+          ))}
+        </div>
         <Link
           to="/money-meeting"
           search={{ tab: lesson.applyTo.tab }}

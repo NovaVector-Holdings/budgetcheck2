@@ -11,6 +11,11 @@ export type Lesson = {
   minutes: number;
   source: string;
   sourceUrl: string;
+  /** For a lesson that draws on more than one named source (e.g. a claim
+   *  the primary source doesn't itself cover) -- rendered alongside the
+   *  primary source link so a multi-source lesson never pretends to have
+   *  only one. Omit entirely for single-source lessons. */
+  additionalSources?: { source: string; sourceUrl: string }[];
   takeaways: string[];
   script: string; // narrated text
   /** Closes the Learn -> Apply loop: where in Money Meeting this lesson's
@@ -67,21 +72,29 @@ export const lessons: Lesson[] = [
     id: "credit-score",
     title: "What actually moves your credit score",
     minutes: 3,
-    source: "Consumer Financial Protection Bureau · Credit reports & scores",
-    sourceUrl: "https://www.consumerfinance.gov/consumer-tools/credit-reports-and-scores/",
+    source: "Consumer Financial Protection Bureau · Understand your credit score",
+    sourceUrl:
+      "https://www.consumerfinance.gov/consumer-tools/credit-reports-and-scores/understand-your-credit-score/",
+    additionalSources: [
+      {
+        source: "AnnualCreditReport.com (official site, jointly run by the three credit bureaus)",
+        sourceUrl: "https://www.annualcreditreport.com/index.action",
+      },
+    ],
     takeaways: [
-      "Payment history and how much of your available credit you use matter the most.",
-      "You are entitled to free weekly credit reports at AnnualCreditReport.com.",
-      "Errors on your report can be disputed — and they are common.",
+      "Paying bills on time has the greatest impact on your score.",
+      "Staying well below your credit limits also matters.",
+      "If your credit report contains an error, you have the right to dispute it.",
     ],
     script:
       "This is a brief overview of credit scores, drawing on the consumer guidance published by the Consumer Financial Protection Bureau. " +
-      "Your credit score is a three-digit number that lenders use to estimate how likely you are to repay borrowed money. The most influential factors in most credit scoring models are your payment history — that is, whether you pay your bills on time — and your credit utilization, which is the percentage of your available credit you are actually using. " +
-      "The length of your credit history, the mix of credit types you have, and recent applications for new credit are also commonly cited as smaller factors in credit scoring models. " +
-      "Two practical points. First, you can get a free copy of your credit report from each of the three nationwide credit bureaus at annualcreditreport.com — currently available weekly, though the CFPB's own guidance simply recommends checking your reports at least once a year. " +
-      "Second, errors on credit reports do happen, and you have the right to dispute them. The CFPB provides free sample dispute letters on its site. " +
+      "Your credit score is a three-digit number that lenders use to estimate how likely you are to repay borrowed money. Paying your bills on time, every time, has the greatest impact on your score, according to the CFPB. " +
+      "Staying well below your credit limit also matters — credit scoring models look at how close you are to being maxed out, and the CFPB suggests keeping your use of credit at no more than 30 percent of your total limit. " +
+      "The length of your credit history and how many accounts you have also play a role, and things like your mix of credit types and recent applications for new credit are commonly cited as smaller factors too. " +
+      "Two practical points. First, if you find something wrong on your credit report, you have the right to dispute it — contact both the credit reporting company and the company that gave them the information, explain what's wrong, and include documents that support your case. " +
+      "Second, you can check your credit report for free every week from each of the three major credit bureaus at AnnualCreditReport.com — a program the credit reporting agencies created and that federal law has now made permanent. " +
       "Improving a credit score is slow but predictable: pay on time, keep balances low relative to limits, and check your reports for mistakes. " +
-      "See the source link for the full CFPB consumer guide.",
+      "See the source links below for the full CFPB guide and AnnualCreditReport.com.",
     applyTo: { tab: "weekly", label: "Bring this to this week's check-in" },
   },
   {
@@ -99,7 +112,7 @@ export const lessons: Lesson[] = [
       "This lesson summarizes the SEC's free publication, Saving and Investing: A Roadmap to Your Financial Security. " +
       "Before investing, the SEC recommends two foundations: pay down high-interest debt, especially credit cards, and build an emergency fund. Investing into the stock market while paying eighteen percent or more interest on a credit card almost never comes out ahead — the SEC notes that virtually no investment can reliably beat a credit card rate that high. " +
       "When you are ready to invest, the SEC stresses three ideas that beginners often underestimate. " +
-      "First, time is the most powerful tool you have. Money invested early has decades to compound, and the SEC's own example shows it plainly: saving just $365 a year — the cost of a daily coffee — and letting it grow at 5% turns into over $1,500 in thirty years, with no additional effort. " +
+      "First, time is the most powerful tool you have. The SEC gives a simple example: saving $1 a day for one year gives you $365. If that one $365 amount were invested at 5% and left alone, it would grow to about $1,577.50 after 30 years — no additional contributions needed. " +
       "Second, fees matter more than they look. Fees may sound small, but the SEC's own brochure warns that even small fees can eat into a significant chunk of your returns over the years you hold an investment — so it's worth comparing costs between similar funds. Always ask what a fund actually costs before investing in it. " +
       "Third, diversification — owning many different investments instead of just one — reduces risk, but it does not eliminate it. All investing involves the possibility of loss. " +
       'The SEC also warns about one of the most common ways people lose money: investment fraud. If an offer promises quick profits, dangles "inside information," or pressures you to invest before you\'ve had a chance to look into it, the SEC says those are classic warning signs of fraud. You can check whether a person or firm is registered with the SEC, and confirm their license and disciplinary history with your state securities regulator through NASAA at nasaa.org. ' +
