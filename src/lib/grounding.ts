@@ -2,82 +2,101 @@ import { z } from "zod";
 
 // Technical grounding for Money Meeting's "Ask a question" assistant.
 //
-// v3. v1/v2 let the model author the final dollar/percent/date STRING in
-// its prose, then reverse-validated that string against the real data --
-// first against one flat number set, then (v2) against typed-but-global
-// sets. That still allowed ENTITY MISATTRIBUTION: a real value that
-// exists somewhere in the snapshot could be attached to the wrong bill,
-// debt, or field ("your rent is $205" when $205 is actually the car
-// loan). Checking "does this number exist somewhere real" can never
-// catch "does this number belong to the specific thing being discussed."
+// v4. Rounds 1-3 protected the VALUE (typed fields, exact resolution,
+// derivation allow-lists). Round 4 added a permanent product guardrail
+// and qualitative/count checks. What remained separable through all of
+// that: structured metadata and DISPLAYED PROSE. A claim could resolve a
+// real, correct value while the model's own surrounding words named a
+// DIFFERENT entity ("Rent is {claim:0}." with claim:0 actually pointing
+// at Water bill) -- the value was authoritative, the entity identity
+// wearing it was not. Likewise a validated ActionCode/DecisionCode did
+// not stop the model's own prose from recommending something else
+// entirely.
 //
-// v3 removes the model's authority to write a dollar/percent/date STRING
-// at all. "answer" is a TEMPLATE containing {claim:N} placeholders only;
-// every actual figure is supplied by BudgetChek, resolved directly from
-// the exact field path the model named in "claims". There is no reverse
-// validation step, because there is nothing left to reverse-validate --
-// the value never came from the model in the first place. A raw dollar,
-// percent, or date literal anywhere in the template outside a
-// placeholder fails the whole response closed.
-//
-// This closes the misattribution gap specifically: BudgetChek resolves
-// claim:0's fieldPath directly and inserts whatever is REALLY there. The
-// remaining honesty gap is a model that mislabels its own claim (fieldPath
-// pointing at the car loan while its own "label" metadata says "Rent") --
-// caught by requiring a claim's self-reported label to be consistent with
-// the entity its own fieldPath names.
-//
-// Recommended actions are likewise now a closed, deterministic-state-
-// validated vocabulary (ActionCode) instead of an arbitrary target +
-// free-form recommendation -- a real target no longer makes an arbitrary
-// recommendation valid; the ACTION ITSELF must be one the underlying
-// engine's rules actually support, checked against real state.
+// v4 closes that by making BudgetChek author every user-facing WORD that
+// carries authority, not just every number:
+//  - A fact/derived claim renders as a full "<entity>'s <field> (<value>)"
+//    phrase, never a bare value -- entity identity travels WITH the
+//    figure, because BudgetChek writes both.
+//  - The model may not name any real entity directly in "answer" text
+//    unless that exact entity is also referenced by one of its claims
+//    (scanForUnclaimedEntityNames) -- an entity name floating free in
+//    prose next to an unrelated claim's value is exactly the
+//    misattribution shape this closes.
+//  - nextActionType "concrete_action" requires the template to contain
+//    exactly one {action} placeholder, filled with a sentence BudgetChek
+//    generates FROM the validated ActionCode (renderActionSentence) --
+//    the model can supply context around it, but cannot state a
+//    different next step. Same pattern for "user_decision" and
+//    {decision} (renderDecisionSentence).
+//  - A new claim kind, "state", covers qualitative facts (paid/unpaid,
+//    complete/incomplete, shortfall/no-shortfall, due present/missing,
+//    in/out of window, tapped/not-tapped) the same authoritative way --
+//    BudgetChek validates the real state and writes the sentence. Round
+//    4's free-text paid/count scans remain running too, as defense in
+//    depth for whatever a model writes outside the structured mechanism.
+//  - `missing` is now a structured, closed list (MissingItem) instead of
+//    free model-authored strings -- an ungrounded response can no longer
+//    leak arbitrary text into the safe fallback through that field.
+//  - review_shortfall_item / review_obligation_options now require the
+//    target to be the item actually affected by the real shortfall (per
+//    the funding plan's own ranking), not merely a real item that
+//    happens to exist somewhere while a shortfall exists somewhere else.
+//  - A discretionary DecisionCode (prioritize_goal, etc.) now requires
+//    the plan to actually be complete with no real shortfall -- a real
+//    shortfall is never offered as an equivalent discretionary choice --
+//    and decision options must be pairwise distinct.
 //
 // Nothing here calls the model. It is pure, deterministic, and testable
 // on its own.
 
 export type FactType = "money" | "percent" | "date" | "count" | "text" | "boolean";
 
-/** What the MODEL sends: a reference to a real fact, never an authored
- *  value. "label" is cosmetic/self-descriptive only -- it drives nothing
- *  on its own except the one honesty check described above (it must be
- *  consistent with the entity its OWN fieldPath addresses).
- *
- *  "user_input" exists so the model can restate a figure the person just
- *  typed themselves (e.g. the "$300" in "what if I put an extra $300
- *  toward this debt") WITHOUT writing it as a raw literal -- it carries
- *  no fieldPath at all, so there is nothing to misattribute and nothing
- *  protected it could ever touch. Deliberately NOT a blanket "any number
- *  the model claims the user said is trusted": it is independently
- *  checked against the actual current message text, same as a derived
- *  claim's operand. */
+export type StateCode =
+  | "bill_paid"
+  | "bill_unpaid"
+  | "plan_complete"
+  | "plan_incomplete"
+  | "has_shortfall"
+  | "no_shortfall"
+  | "due_present"
+  | "due_missing"
+  | "in_window"
+  | "out_of_window"
+  | "reserved_tapped"
+  | "reserved_not_tapped";
+
+/** What the MODEL sends: a reference to a real fact, derivation, the
+ *  person's own just-typed figure, or a qualitative state -- never an
+ *  authored value or entity name. BudgetChek resolves and renders every
+ *  word that carries authority; the model only ever picks WHICH real
+ *  thing to talk about. */
 export interface Claim {
-  label: string;
-  kind: "fact" | "derived" | "user_input";
-  /** Required for "fact" and "derived". Absent for "user_input" -- there
-   *  is no real field being addressed, only the person's own just-typed
-   *  figure. Exact addressing scheme: "snapshot.<dotted.path>" for
-   *  whole-snapshot aggregates (e.g. "snapshot.funding.available"), or
-   *  "<kind>:<exact entity name>.<field>" for an entity-scoped figure
-   *  (e.g. "debt:Credit card.balance", "bill:Electric bill.amount"). */
+  kind: "fact" | "derived" | "user_input" | "state";
+  /** Required for "fact"/"derived", and for the "state" codes that name
+   *  a specific bill/debt/reserved fund. Absent for "user_input" and for
+   *  whole-plan state codes (plan_complete, has_shortfall, etc.). Exact
+   *  addressing scheme: "snapshot.<dotted.path>" for whole-snapshot
+   *  aggregates, or "<kind>:<exact entity name>.<field>" for an
+   *  entity-scoped figure. */
   fieldPath?: string;
   /** "derived" only: the operation combining the base fieldPath's real
    *  value with a figure the person just typed. */
   operation?: "add" | "subtract";
   /** "derived" and "user_input": the literal number the person typed
    *  THIS turn -- never inferred, never carried over from an earlier
-   *  turn. For "derived" it's the operand combined with the base
-   *  fieldPath; for "user_input" it's the whole of what's being cited. */
+   *  turn. */
   userOperand?: string;
+  /** "state" only: which qualitative fact is being asserted. */
+  stateCode?: StateCode;
 }
 
-/** What the SERVER resolves and hands to the client for display -- the
- *  wire shape stays what the round-2 UI already renders, so the "Show
- *  what this used" panel needed no changes. */
+/** What the SERVER resolves and hands to the client for display -- a
+ *  fully-authored, entity-bound phrase, not a bare value. */
 export interface UsedFact {
   label: string;
   value: string;
-  source: "snapshot" | "derived";
+  source: "snapshot" | "derived" | "state";
 }
 
 export type NextActionType =
@@ -87,14 +106,10 @@ export type NextActionType =
   | "clarifying_question"
   | "insufficient_data";
 
-/** A closed, deterministic-state-validated action vocabulary. The model
- *  may only ever recommend one of these -- it explains a validated
- *  action, it does not invent one. A real, resolvable targetFieldPath is
- *  necessary for most codes but never sufficient on its own; each code's
- *  own real-state precondition (see validateAction) is what actually
- *  gates it. There is deliberately no code meaning "skip", "ignore", or
- *  "pay late" -- that is the permanent responsible-obligation guardrail,
- *  enforced structurally by the vocabulary simply not containing one. */
+/** A closed, deterministic-state-validated action vocabulary. There is
+ *  deliberately no code meaning "skip", "ignore", or "pay late" -- the
+ *  permanent responsible-obligation guardrail, enforced structurally by
+ *  the vocabulary simply not containing one. */
 export type ActionCode =
   | "hold_for_due_item"
   | "review_due_date"
@@ -111,16 +126,10 @@ export interface StructuredAction {
   targetFieldPath?: string;
 }
 
-/** A closed vocabulary for genuine values/tradeoff decisions -- the same
- *  "no unsupported directive in the vocabulary" principle as ActionCode,
- *  applied to nextActionType "user_decision". Before this round,
- *  "user_decision" carried no structure at all and was a real bypass:
- *  an unsupported recommendation ("skip rent, put it toward the Visa")
- *  became valid merely by being labeled a decision instead of an action.
- *  There is deliberately no code for skipping, ignoring, or deferring a
- *  real obligation -- a genuine preference belongs to the person, but it
- *  is always a choice BETWEEN things BudgetChek actually supports, never
- *  a directive to not meet a known responsibility. */
+/** A closed vocabulary for genuine values/tradeoff decisions. Same
+ *  "no unsupported directive in the vocabulary" principle as ActionCode.
+ *  Only ever offered when the plan actually supports discretion (see
+ *  validateDecision) -- never as an equivalent to a real shortfall. */
 export type DecisionCode =
   | "prioritize_goal"
   | "prioritize_extra_debt_payment"
@@ -133,22 +142,41 @@ export interface DecisionOption {
   targetFieldPath?: string;
 }
 
-/** Required when nextActionType is "user_decision" -- at least two real
- *  options, because a "decision" with fewer than two isn't a choice. */
+/** Required when nextActionType is "user_decision" -- at least two real,
+ *  DISTINCT options, because a "decision" with fewer than two, or two
+ *  copies of the same one, isn't a choice. */
 export interface StructuredDecision {
   options: DecisionOption[];
 }
 
+export type MissingCode =
+  | "missing_due_date"
+  | "missing_amount"
+  | "missing_balance"
+  | "missing_apr"
+  | "missing_minimum"
+  | "missing_other";
+
+/** Replaces free-form model-authored strings. BudgetChek renders the
+ *  user-facing wording from the code (+ optional real target) --
+ *  there is no field here an ungrounded response could use to smuggle
+ *  arbitrary text into the safe fallback. */
+export interface MissingItem {
+  code: MissingCode;
+  targetFieldPath?: string;
+}
+
 /** The contract the model must return instead of free-form prose. Strict:
  *  every field is required, every enum is closed, no dollar/percent/date
- *  literal may appear in "answer" outside a {claim:N} placeholder. There
- *  is no permissive default anywhere in the schema that parses this shape
- *  (see AskResponseSchema below) -- a response that doesn't match exactly
+ *  literal and no unclaimed real entity name may appear in "answer"
+ *  outside the placeholders BudgetChek controls. There is no permissive
+ *  default anywhere in the schema that parses this shape (see
+ *  AskResponseSchema below) -- a response that doesn't match exactly
  *  fails closed rather than being coerced into something that does. */
 export interface AskResponseContract {
   answer: string;
   claims: Claim[];
-  missing: string[];
+  missing: MissingItem[];
   nextActionType: NextActionType;
   /** Required only when nextActionType is "concrete_action". */
   action?: StructuredAction;
@@ -160,10 +188,10 @@ export interface GroundingVerdict {
   grounded: boolean;
   /** Internal diagnostic only. Never shown to the user. */
   reason?: string;
-  /** The specific literal/field/code token that failed, if any. */
+  /** The specific literal/field/code/entity token that failed, if any. */
   offendingToken?: string;
   /** Present only when grounded: true -- the template with every
-   *  {claim:N} substituted for its real, resolved, formatted value. */
+   *  placeholder substituted for its real, BudgetChek-authored text. */
   renderedAnswer?: string;
   /** Present only when grounded: true -- the resolved claims, in the
    *  wire shape the client already renders. */
@@ -183,9 +211,7 @@ interface FieldMeta {
   protected: boolean;
   /** May be the base operand of a "derived" claim (money add/subtract
    *  with a user-typed figure). Deliberately a short, explicit allow-list
-   *  -- not "any money field" -- because the realistic hypothetical
-   *  shapes this product supports are "extra payment toward a debt" and
-   *  "extra contribution toward a goal", nothing broader. */
+   *  -- not "any money field". */
   derivable: boolean;
 }
 
@@ -216,14 +242,33 @@ const SNAPSHOT_PATHS: Record<string, FieldMeta> = {
   nextPayDate: { type: "date", protected: false, derivable: false },
 };
 
+const SNAPSHOT_LABELS: Record<string, string> = {
+  "snapshot.todayIso": "today's date",
+  "snapshot.window.start": "the window start",
+  "snapshot.window.end": "the window end",
+  "snapshot.projection.startingBalance": "starting balance",
+  "snapshot.projection.certainInflows": "certain inflows",
+  "snapshot.projection.certainOutflows": "certain outflows",
+  "snapshot.projection.uncertainOutflows": "uncertain outflows",
+  "snapshot.projection.discretionaryCommitted": "discretionary committed",
+  "snapshot.projection.reservedHeld": "reserved held",
+  "snapshot.projection.projectedMinBalance": "estimated remaining",
+  "snapshot.projection.lowPoint.date": "the low point date",
+  "snapshot.projection.lowPoint.balance": "the low point balance",
+  "snapshot.funding.available": "available",
+  "snapshot.funding.cutoffIndex": "the cutoff index",
+  "snapshot.funding.totalRequested": "total requested",
+  "snapshot.funding.shortfall": "the shortfall",
+  "snapshot.reservedTotal": "reserved total",
+  payFrequency: "pay frequency",
+  nextPayDate: "next pay date",
+};
+
 /** Entity kind -> field -> meta. Entities are addressed by their exact,
- *  real name (e.g. "debt:Credit card.balance") -- the same name string the
- *  model is shown in the snapshot, never a synthetic id it has to guess.
- *  `due` on debt is new this round: debts have no due-date COLUMN at all
- *  in the current schema, so it is always sent as null -- a real,
- *  permanently-missing field, which is exactly what makes
- *  "add_missing_due_date" meaningfully checkable against a real debt
- *  today. Filling it in is a separate, not-yet-built product capability. */
+ *  real name -- the same name string the model is shown in the
+ *  snapshot, never a synthetic id it has to guess. `due` on debt is
+ *  always null today -- there is no due-date column on the debts table
+ *  at all, a genuine, permanent absence, not "not yet loaded". */
 const ENTITY_FIELDS: Record<string, Record<string, FieldMeta>> = {
   debt: {
     balance: { type: "money", protected: false, derivable: true },
@@ -248,6 +293,14 @@ const ENTITY_FIELDS: Record<string, Record<string, FieldMeta>> = {
     amount: { type: "money", protected: true, derivable: false },
     tapped: { type: "money", protected: true, derivable: false },
   },
+};
+
+const FIELD_DESCRIPTORS: Record<string, Record<string, string>> = {
+  debt: { balance: "balance", apr: "APR", minimum: "minimum payment", due: "due date" },
+  bill: { amount: "amount", due: "due date", paid: "paid status" },
+  goal: { target: "target", saved: "saved amount" },
+  account: { balance: "balance", limit: "limit" },
+  reserved: { amount: "reserved amount", tapped: "tapped amount" },
 };
 
 const ENTITY_ARRAY_KEY: Record<string, string> = {
@@ -282,14 +335,10 @@ function getByDottedPath(root: unknown, dotted: string): unknown {
   return cur;
 }
 
-/** Resolves a fieldPath string against the REAL parsed payload
- *  ({snapshot, accounts, reserved, caps, bills, debts, goals,
- *  payFrequency, nextPayDate}), returning its declared type/flags and its
- *  actual current value (which may legitimately be null, e.g. a debt's
- *  permanently-absent due date) -- or null if the path doesn't address
- *  anything real at all. This is the only source of truth; nothing is
- *  inferred from the shape of a claimed value, because claims never
- *  carry a value to infer from. */
+/** Resolves a fieldPath string against the REAL parsed payload, returning
+ *  its declared type/flags and its actual current value (which may
+ *  legitimately be null) -- or null if the path doesn't address anything
+ *  real at all. */
 function resolveFieldPath(fieldPath: string, payload: Record<string, unknown>): Resolved | null {
   const entityMatch = fieldPath.match(ENTITY_FIELD_PATH_RE);
   if (entityMatch) {
@@ -313,16 +362,26 @@ function resolveFieldPath(fieldPath: string, payload: Record<string, unknown>): 
   return { meta, value };
 }
 
-/** The one honesty check a direct-resolution model can't structurally
- *  rule out: a claim whose OWN label disagrees with the entity its OWN
- *  fieldPath names (fieldPath -> the car loan, label -> "Rent amount").
- *  Snapshot-level (non-entity) paths have no cross-entity ambiguity, so
- *  this only applies to entity-scoped paths. */
-function labelConsistentWithFieldPath(label: string, fieldPath: string): boolean {
+function extractEntityName(fieldPath?: string): string | null {
+  if (!fieldPath) return null;
   const m = fieldPath.match(ENTITY_FIELD_PATH_RE);
-  if (!m) return true;
-  const entityName = m[2];
-  return label.toLowerCase().includes(entityName.toLowerCase());
+  return m ? m[2] : null;
+}
+
+function collectAllEntityNames(payload: Record<string, unknown>): string[] {
+  const names: string[] = [];
+  for (const kind of Object.keys(ENTITY_ARRAY_KEY)) {
+    const arr = payload[ENTITY_ARRAY_KEY[kind]];
+    if (!Array.isArray(arr)) continue;
+    const nameField = ENTITY_NAME_FIELD[kind];
+    for (const e of arr) {
+      if (e && typeof e === "object") {
+        const n = (e as Record<string, unknown>)[nameField];
+        if (typeof n === "string") names.push(n);
+      }
+    }
+  }
+  return names;
 }
 
 function round2(n: number): number {
@@ -350,8 +409,8 @@ function numbersInText(text: string): number[] {
 }
 
 // ---------------------------------------------------------------------------
-// Formatting -- BudgetChek authors every figure the person sees; the
-// model only ever names which real field to format.
+// Formatting and authoritative phrasing -- BudgetChek authors every word
+// that carries authority: the value AND the entity identity around it.
 // ---------------------------------------------------------------------------
 
 function formatMoney(n: number): string {
@@ -382,12 +441,159 @@ function formatByType(type: FactType, value: unknown): string {
   }
 }
 
+/** The authoritative phrase for a fact/derived claim -- entity identity
+ *  and value bound together, both written by BudgetChek. Never a bare
+ *  value: "Rent's amount ($900.00)", not just "$900.00" -- so the
+ *  entity a claim is actually about can never be silently swapped by
+ *  whatever free prose surrounds the placeholder. */
+function authoritativePhrase(
+  fieldPath: string,
+  meta: FieldMeta,
+  value: unknown,
+  hypothetical: boolean,
+): string {
+  const formatted = formatByType(meta.type, value);
+  const m = fieldPath.match(ENTITY_FIELD_PATH_RE);
+  if (m) {
+    const [, kind, name, field] = m;
+    const descriptor = FIELD_DESCRIPTORS[kind]?.[field] ?? field;
+    return hypothetical
+      ? `${name}'s hypothetical ${descriptor} (${formatted})`
+      : `${name}'s ${descriptor} (${formatted})`;
+  }
+  const label = SNAPSHOT_LABELS[fieldPath] ?? fieldPath;
+  return `${label} (${formatted})`;
+}
+
 // ---------------------------------------------------------------------------
-// Resolving one claim into its real, formatted value
+// Resolving one claim -- fact, derived, user_input, or state
 // ---------------------------------------------------------------------------
 
 type ClaimResolution =
   { ok: true; formatted: string } | { ok: false; reason: string; offendingToken?: string };
+
+function resolveStateClaim(claim: Claim, payload: Record<string, unknown>): ClaimResolution {
+  const code = claim.stateCode;
+  if (!code) return { ok: false, reason: "state claim is missing stateCode" };
+  const snap = (payload.snapshot ?? {}) as Record<string, unknown>;
+  const funding = (snap.funding ?? null) as { shortfall?: number } | null;
+  const window = (snap.window ?? null) as { start: string; end: string } | null;
+  const shortfall = typeof funding?.shortfall === "number" ? funding.shortfall : 0;
+
+  const needsTarget = (re: RegExp) => {
+    if (!claim.fieldPath || !re.test(claim.fieldPath)) return null;
+    return resolveFieldPath(claim.fieldPath, payload);
+  };
+
+  switch (code) {
+    case "bill_paid":
+    case "bill_unpaid": {
+      const resolved = needsTarget(/^bill:(.+)\.paid$/);
+      if (!resolved || typeof resolved.value !== "boolean") {
+        return {
+          ok: false,
+          reason: `${code} requires a targetFieldPath naming a real bill's paid field`,
+        };
+      }
+      const name = extractEntityName(claim.fieldPath)!;
+      if (code === "bill_paid") {
+        if (resolved.value !== true)
+          return { ok: false, reason: `claimed "${name}" is paid, but it is not` };
+        return { ok: true, formatted: `${name} is already paid` };
+      }
+      if (resolved.value !== false)
+        return { ok: false, reason: `claimed "${name}" is unpaid, but it is paid` };
+      return { ok: true, formatted: `${name} is still unpaid` };
+    }
+    case "plan_complete":
+    case "plan_incomplete": {
+      const isComplete = snap.complete === true;
+      if (code === "plan_complete") {
+        if (!isComplete)
+          return { ok: false, reason: "claimed the plan is complete, but it is not" };
+        return { ok: true, formatted: "the plan is complete" };
+      }
+      if (isComplete)
+        return { ok: false, reason: "claimed the plan is incomplete, but it is complete" };
+      return { ok: true, formatted: "the plan isn't complete yet" };
+    }
+    case "has_shortfall":
+    case "no_shortfall": {
+      if (code === "has_shortfall") {
+        if (!(shortfall > 0))
+          return { ok: false, reason: "claimed a shortfall exists, but there isn't one" };
+        return { ok: true, formatted: "there is a shortfall in the current plan" };
+      }
+      if (shortfall > 0)
+        return { ok: false, reason: "claimed there is no shortfall, but there is one" };
+      return { ok: true, formatted: "the plan is fully covered, with no shortfall" };
+    }
+    case "due_present":
+    case "due_missing": {
+      const resolved = needsTarget(/^(bill|debt):(.+)\.due$/);
+      if (!resolved) {
+        return {
+          ok: false,
+          reason: `${code} requires a targetFieldPath naming a real bill or debt's due field`,
+        };
+      }
+      const name = extractEntityName(claim.fieldPath)!;
+      if (code === "due_present") {
+        if (typeof resolved.value !== "string")
+          return { ok: false, reason: `claimed "${name}" has a due date on file, but it does not` };
+        return {
+          ok: true,
+          formatted: `${name}'s due date is on file (${formatDateLong(resolved.value)})`,
+        };
+      }
+      if (resolved.value !== null)
+        return { ok: false, reason: `claimed "${name}" has no due date, but it does` };
+      return { ok: true, formatted: `${name} doesn't have a due date on file` };
+    }
+    case "in_window":
+    case "out_of_window": {
+      const resolved = needsTarget(/^(bill|debt):(.+)\.due$/);
+      if (!resolved || typeof resolved.value !== "string") {
+        return {
+          ok: false,
+          reason: `${code} requires a targetFieldPath naming a real bill or debt with a real due date`,
+        };
+      }
+      const name = extractEntityName(claim.fieldPath)!;
+      const inWin = window ? withinWindow(resolved.value, window) : false;
+      if (code === "in_window") {
+        if (!inWin)
+          return { ok: false, reason: `claimed "${name}" is due within the window, but it is not` };
+        return { ok: true, formatted: `${name} is due within the current window` };
+      }
+      if (inWin)
+        return {
+          ok: false,
+          reason: `claimed "${name}" is outside the window, but it is within it`,
+        };
+      return { ok: true, formatted: `${name} is due after the current window` };
+    }
+    case "reserved_tapped":
+    case "reserved_not_tapped": {
+      const resolved = needsTarget(/^reserved:(.+)\.tapped$/);
+      if (!resolved || typeof resolved.value !== "number") {
+        return {
+          ok: false,
+          reason: `${code} requires a targetFieldPath naming a real reserved fund's tapped field`,
+        };
+      }
+      const name = extractEntityName(claim.fieldPath)!;
+      if (code === "reserved_tapped") {
+        if (!(resolved.value > 0))
+          return { ok: false, reason: `claimed "${name}" has been tapped, but it has not` };
+        return { ok: true, formatted: `${name} has been tapped` };
+      }
+      if (resolved.value > 0)
+        return { ok: false, reason: `claimed "${name}" has not been tapped, but it has` };
+      return { ok: true, formatted: `${name} has not been tapped` };
+    }
+  }
+}
 
 function resolveClaim(
   claim: Claim,
@@ -396,15 +602,9 @@ function resolveClaim(
 ): ClaimResolution {
   if (claim.kind === "user_input") {
     // No fieldPath at all -- nothing to resolve against real data,
-    // nothing to misattribute, nothing protected it could touch. The
-    // only thing to check is that the person actually typed this exact
-    // figure themselves, this turn.
+    // nothing to misattribute, nothing protected it could touch.
     if (!claim.userOperand) {
-      return {
-        ok: false,
-        reason: `user_input claim "${claim.label}" is missing userOperand`,
-        offendingToken: claim.label,
-      };
+      return { ok: false, reason: "user_input claim is missing userOperand" };
     }
     const n = parseNumericClaim(claim.userOperand);
     if (n == null || !numbersInText(currentUserMessage).some((u) => moneyClose(u, n))) {
@@ -417,25 +617,18 @@ function resolveClaim(
     return { ok: true, formatted: formatMoney(round2(n)) };
   }
 
+  if (claim.kind === "state") {
+    return resolveStateClaim(claim, payload);
+  }
+
   if (!claim.fieldPath) {
-    return {
-      ok: false,
-      reason: `claim "${claim.label}" of kind "${claim.kind}" requires a fieldPath`,
-      offendingToken: claim.label,
-    };
+    return { ok: false, reason: `claim of kind "${claim.kind}" requires a fieldPath` };
   }
   const resolved = resolveFieldPath(claim.fieldPath, payload);
   if (!resolved) {
     return {
       ok: false,
       reason: `fieldPath "${claim.fieldPath}" does not resolve to anything real`,
-      offendingToken: claim.fieldPath,
-    };
-  }
-  if (!labelConsistentWithFieldPath(claim.label, claim.fieldPath)) {
-    return {
-      ok: false,
-      reason: `claim labeled "${claim.label}" points its fieldPath at a different real entity ("${claim.fieldPath}") -- possible misattribution`,
       offendingToken: claim.fieldPath,
     };
   }
@@ -448,7 +641,10 @@ function resolveClaim(
         offendingToken: claim.fieldPath,
       };
     }
-    return { ok: true, formatted: formatByType(resolved.meta.type, resolved.value) };
+    return {
+      ok: true,
+      formatted: authoritativePhrase(claim.fieldPath, resolved.meta, resolved.value, false),
+    };
   }
 
   // kind === "derived"
@@ -476,8 +672,7 @@ function resolveClaim(
   if (!claim.operation || !claim.userOperand) {
     return {
       ok: false,
-      reason: `derived claim "${claim.label}" is missing operation/userOperand`,
-      offendingToken: claim.label,
+      reason: `derived claim's fieldPath "${claim.fieldPath}" is missing operation/userOperand`,
     };
   }
   const operandNum = parseNumericClaim(claim.userOperand);
@@ -493,7 +688,10 @@ function resolveClaim(
   }
   const result =
     claim.operation === "add" ? resolved.value + operandNum : resolved.value - operandNum;
-  return { ok: true, formatted: formatMoney(round2(result)) };
+  return {
+    ok: true,
+    formatted: authoritativePhrase(claim.fieldPath, resolved.meta, round2(result), true),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -504,18 +702,51 @@ const MONTHS =
   "January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec";
 const MONTH_DATE_RE = new RegExp(`\\b(?:${MONTHS})\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?\\b`, "i");
 
-/** Any raw dollar, percent, or date-shaped literal in the template, once
- *  every {claim:N} placeholder is stripped out -- i.e. a figure the model
- *  tried to author itself instead of referencing a claim. */
-function firstRawFigureToken(templateWithoutPlaceholders: string): string | null {
-  const dollar = templateWithoutPlaceholders.match(/\$\s?-?\d[\d,]*(?:\.\d{1,2})?/);
+/** Any raw dollar, percent, or date-shaped literal once every placeholder
+ *  is stripped out -- a figure the model tried to author itself. */
+function firstRawFigureToken(text: string): string | null {
+  const dollar = text.match(/\$\s?-?\d[\d,]*(?:\.\d{1,2})?/);
   if (dollar) return dollar[0];
-  const pct = templateWithoutPlaceholders.match(/-?\d+(?:\.\d+)?\s?%/);
+  const pct = text.match(/-?\d+(?:\.\d+)?\s?%/);
   if (pct) return pct[0];
-  const iso = templateWithoutPlaceholders.match(/\b\d{4}-\d{2}-\d{2}\b/);
+  const iso = text.match(/\b\d{4}-\d{2}-\d{2}\b/);
   if (iso) return iso[0];
-  const monthDate = templateWithoutPlaceholders.match(MONTH_DATE_RE);
+  const monthDate = text.match(MONTH_DATE_RE);
   if (monthDate) return monthDate[0];
+  return null;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Any real entity name mentioned raw in the template that is NOT the
+ *  entity of one of this response's own claims. This is what actually
+ *  stops "Rent is {claim:0}." when claim:0 resolves to Water bill --
+ *  "Rent" is a real name, it is not claimed anywhere in this response,
+ *  so it is rejected before the placeholder is ever substituted.
+ *  Matches the full entity name, and its first word when that word is
+ *  distinctive (>= 4 chars) so a shortened reference ("Visa" for "Visa
+ *  card") is caught too. */
+function scanForUnclaimedEntityNames(
+  text: string,
+  claims: Claim[],
+  payload: Record<string, unknown>,
+): string | null {
+  const claimedNames = new Set(
+    claims
+      .map((c) => extractEntityName(c.fieldPath))
+      .filter((n): n is string => !!n)
+      .map((n) => n.toLowerCase()),
+  );
+  for (const name of collectAllEntityNames(payload)) {
+    if (claimedNames.has(name.toLowerCase())) continue;
+    const firstWord = name.split(/\s+/)[0];
+    const candidates = firstWord.length >= 4 ? [name, firstWord] : [name];
+    for (const candidate of candidates) {
+      if (new RegExp(`\\b${escapeRegex(candidate)}\\b`, "i").test(text)) return name;
+    }
+  }
   return null;
 }
 
@@ -526,18 +757,31 @@ type RenderResult =
   | { ok: false; reason: string; offendingToken?: string };
 
 function renderAnswerTemplate(
-  template: string,
-  claims: Claim[],
+  response: AskResponseContract,
   payload: Record<string, unknown>,
   currentUserMessage: string,
 ): RenderResult {
-  const stripped = template.replace(CLAIM_PLACEHOLDER_RE, "");
-  const rawFigure = firstRawFigureToken(stripped);
+  const { answer: template, claims, nextActionType, action, decision } = response;
+
+  const withoutPlaceholders = template
+    .replace(CLAIM_PLACEHOLDER_RE, "")
+    .replace(/\{action\}/g, "")
+    .replace(/\{decision\}/g, "");
+
+  const rawFigure = firstRawFigureToken(withoutPlaceholders);
   if (rawFigure) {
     return {
       ok: false,
       reason: "answer contains a literal figure not backed by a {claim:N} placeholder",
       offendingToken: rawFigure,
+    };
+  }
+  const unclaimedEntity = scanForUnclaimedEntityNames(withoutPlaceholders, claims, payload);
+  if (unclaimedEntity) {
+    return {
+      ok: false,
+      reason: `answer names "${unclaimedEntity}" in prose without an authoritative claim for it -- possible misattribution`,
+      offendingToken: unclaimedEntity,
     };
   }
 
@@ -560,24 +804,58 @@ function renderAnswerTemplate(
     if (!res.ok) return { ok: false, reason: res.reason, offendingToken: res.offendingToken };
     formattedByIndex.set(i, res.formatted);
     resolvedFacts.push({
-      label: claim.label,
+      label: res.formatted,
       value: res.formatted,
-      source: claim.kind === "derived" ? "derived" : "snapshot",
+      source: claim.kind === "derived" ? "derived" : claim.kind === "state" ? "state" : "snapshot",
     });
   }
 
-  const rendered = template.replace(
+  let rendered = template.replace(
     CLAIM_PLACEHOLDER_RE,
     (_full, idxStr: string) => formattedByIndex.get(Number(idxStr)) ?? "",
   );
+
+  const hasActionPlaceholder = /\{action\}/.test(rendered);
+  if (nextActionType === "concrete_action") {
+    if (!hasActionPlaceholder) {
+      return {
+        ok: false,
+        reason: "concrete_action requires exactly one {action} placeholder in answer",
+      };
+    }
+    if (!action) return { ok: false, reason: "concrete_action requires a structured action" };
+    rendered = rendered.replace(/\{action\}/g, renderActionSentence(action, payload));
+  } else if (hasActionPlaceholder) {
+    return {
+      ok: false,
+      reason: "{action} placeholder used without nextActionType concrete_action",
+    };
+  }
+
+  const hasDecisionPlaceholder = /\{decision\}/.test(rendered);
+  if (nextActionType === "user_decision") {
+    if (!hasDecisionPlaceholder) {
+      return {
+        ok: false,
+        reason: "user_decision requires exactly one {decision} placeholder in answer",
+      };
+    }
+    if (!decision) return { ok: false, reason: "user_decision requires a structured decision" };
+    rendered = rendered.replace(/\{decision\}/g, renderDecisionSentence(decision, payload));
+  } else if (hasDecisionPlaceholder) {
+    return {
+      ok: false,
+      reason: "{decision} placeholder used without nextActionType user_decision",
+    };
+  }
+
   return { ok: true, rendered, resolvedFacts };
 }
 
 // ---------------------------------------------------------------------------
 // Structured actions -- a closed vocabulary, each validated against real,
-// deterministic state. A real target does not make an arbitrary
-// recommendation valid; the ACTION CODE ITSELF must be one the
-// underlying engine's rules actually support.
+// deterministic state, AND rendered by BudgetChek so the displayed next
+// step can never disagree with what was validated.
 // ---------------------------------------------------------------------------
 
 function isoLte(a: string, b: string): boolean {
@@ -592,6 +870,42 @@ type ActionVerdict = { ok: true } | { ok: false; reason: string };
 
 function fail(reason: string): ActionVerdict {
   return { ok: false, reason };
+}
+
+/** Is this bill/debt actually one of the items the current funding plan
+ *  identifies as affected by the shortfall (partially funded, unfunded,
+ *  or at/after the real cutoff) -- not merely a real item that happens
+ *  to exist while a shortfall exists elsewhere. Matches funding items by
+ *  label: bills by exact name, debts by the engine's own "<name>
+ *  minimum" labeling convention. A more stable id-based link on funding
+ *  items would be more robust long-term (noted in the return package);
+ *  this is deliberately conservative -- unmatched or ambiguous items are
+ *  NOT considered affected. */
+function isShortfallAffectedTarget(fieldPath: string, payload: Record<string, unknown>): boolean {
+  const m = fieldPath.match(/^(bill|debt):(.+)\.(amount|balance|minimum)$/);
+  if (!m) return false;
+  const [, kind, name] = m;
+  const snap = (payload.snapshot ?? {}) as Record<string, unknown>;
+  const funding = snap.funding as { items?: unknown; cutoffIndex?: number } | undefined;
+  const items = funding?.items;
+  if (!Array.isArray(items)) return false;
+  const cutoff = typeof funding?.cutoffIndex === "number" ? funding.cutoffIndex : -1;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (!item || typeof item !== "object") continue;
+    const label = (item as Record<string, unknown>).label;
+    if (typeof label !== "string") continue;
+    const matches =
+      kind === "bill"
+        ? label.toLowerCase() === name.toLowerCase()
+        : label.toLowerCase() === `${name.toLowerCase()} minimum`;
+    if (!matches) continue;
+    const status = (item as Record<string, unknown>).status;
+    if (status === "partial" || status === "unfunded") return true;
+    if (cutoff >= 0 && i >= cutoff) return true;
+    return false;
+  }
+  return false;
 }
 
 function validateAction(action: StructuredAction, payload: Record<string, unknown>): ActionVerdict {
@@ -618,9 +932,6 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
       }
       const debtMinMatch = action.targetFieldPath.match(/^debt:(.+)\.minimum$/);
       if (debtMinMatch) {
-        // A known minimum amount does not prove it's due before the next
-        // paycheck -- BudgetChek does not guess debt timing. Require a
-        // real, in-window due date, same standard as a bill.
         const min = resolveFieldPath(action.targetFieldPath, payload);
         const due = resolveFieldPath(`debt:${debtMinMatch[1]}.due`, payload);
         if (!min || typeof min.value !== "number") {
@@ -670,15 +981,11 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
     case "pay_required_minimum": {
       if (!action.targetFieldPath) return fail("pay_required_minimum requires a targetFieldPath");
       const m = action.targetFieldPath.match(/^debt:(.+)\.minimum$/);
-      if (!m) {
-        return fail("pay_required_minimum target must be a debt's minimum field");
-      }
+      if (!m) return fail("pay_required_minimum target must be a debt's minimum field");
       const resolved = resolveFieldPath(action.targetFieldPath, payload);
       if (!resolved || typeof resolved.value !== "number") {
         return fail("pay_required_minimum target does not resolve to a real minimum payment");
       }
-      // A known minimum amount does not prove it's due before the next
-      // paycheck -- BudgetChek does not guess debt timing.
       const due = resolveFieldPath(`debt:${m[1]}.due`, payload);
       if (!due || typeof due.value !== "string") {
         return fail(
@@ -698,22 +1005,21 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
       if (!/^(bill:(.+)\.amount|debt:(.+)\.balance)$/.test(action.targetFieldPath)) {
         return fail("review_shortfall_item target must be a real bill amount or debt balance");
       }
-      const resolved = resolveFieldPath(action.targetFieldPath, payload);
-      if (!resolved) return fail("review_shortfall_item target does not resolve to anything real");
+      if (!resolveFieldPath(action.targetFieldPath, payload)) {
+        return fail("review_shortfall_item target does not resolve to anything real");
+      }
       if (typeof funding?.shortfall !== "number" || funding.shortfall <= 0) {
         return fail("review_shortfall_item requires a real shortfall in the current plan");
+      }
+      if (!isShortfallAffectedTarget(action.targetFieldPath, payload)) {
+        return fail(
+          "review_shortfall_item target is not one of the items actually affected by the current shortfall",
+        );
       }
       return { ok: true };
     }
 
     case "review_obligation_options": {
-      // "BudgetChek has identified a real obligation that cannot
-      // currently be covered and is directing the user to review it
-      // before the due date" -- never "skip it". Same real-shortfall
-      // precondition as review_shortfall_item; a distinct code so the
-      // system prompt can teach the "review before due date, consider
-      // contacting the provider" framing specifically, without implying
-      // nonpayment is ever the supported resolution.
       if (!action.targetFieldPath)
         return fail("review_obligation_options requires a targetFieldPath");
       if (
@@ -723,11 +1029,16 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
           "review_obligation_options target must be a real bill amount or debt balance/minimum",
         );
       }
-      const resolved = resolveFieldPath(action.targetFieldPath, payload);
-      if (!resolved)
+      if (!resolveFieldPath(action.targetFieldPath, payload)) {
         return fail("review_obligation_options target does not resolve to anything real");
+      }
       if (typeof funding?.shortfall !== "number" || funding.shortfall <= 0) {
         return fail("review_obligation_options requires a real shortfall in the current plan");
+      }
+      if (!isShortfallAffectedTarget(action.targetFieldPath, payload)) {
+        return fail(
+          "review_obligation_options target is not one of the items actually affected by the current shortfall",
+        );
       }
       return { ok: true };
     }
@@ -765,12 +1076,77 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
   }
 }
 
-/** A structured decision, one option at a time. Each option must
- *  reference a real entity where the code needs one, and be valid
- *  against real state -- the same "closed vocabulary + real-state
- *  precondition" standard as validateAction, applied to genuine
- *  preference/tradeoff decisions rather than directives. There is no
- *  code here that means "don't pay" anything -- that's the point. */
+/** BudgetChek's own authoritative closing sentence for a validated
+ *  action -- the model may explain context around it, but this is the
+ *  sentence the person actually sees for "what to do next", generated
+ *  FROM the real state, never from model prose. Defensive fallbacks
+ *  throughout in case of an unexpected resolution gap; validateAction
+ *  has already run by the time this is called, so these should never
+ *  actually trigger in practice. */
+function renderActionSentence(action: StructuredAction, payload: Record<string, unknown>): string {
+  const get = (path: string) => resolveFieldPath(path, payload);
+  const moneyOr = (path: string, fallback: string) => {
+    const r = get(path);
+    return typeof r?.value === "number" ? formatMoney(r.value) : fallback;
+  };
+  const dateOr = (path: string, fallback: string) => {
+    const r = get(path);
+    return typeof r?.value === "string" ? formatDateLong(r.value) : fallback;
+  };
+
+  switch (action.code) {
+    case "hold_for_due_item": {
+      const billMatch = action.targetFieldPath?.match(/^bill:(.+)\.amount$/);
+      if (billMatch) {
+        const name = billMatch[1];
+        return `Keep ${moneyOr(action.targetFieldPath!, "the amount")} aside for ${name}, due ${dateOr(`bill:${name}.due`, "soon")}.`;
+      }
+      const debtMatch = action.targetFieldPath?.match(/^debt:(.+)\.minimum$/);
+      if (debtMatch) {
+        const name = debtMatch[1];
+        return `Keep ${moneyOr(action.targetFieldPath!, "the minimum")} aside for ${name}'s minimum payment, due ${dateOr(`debt:${name}.due`, "soon")}.`;
+      }
+      return "Keep money aside for this item.";
+    }
+    case "review_due_date": {
+      const m = action.targetFieldPath?.match(/^(bill|debt):(.+)\.due$/);
+      const name = m?.[2] ?? "this item";
+      return `Take a look at ${name}'s due date (${dateOr(action.targetFieldPath ?? "", "on file")}).`;
+    }
+    case "add_missing_due_date": {
+      const m = action.targetFieldPath?.match(/^(bill|debt):(.+)\.due$/);
+      const name = m?.[2] ?? "this item";
+      return `Add the due date for ${name} -- it isn't on file yet.`;
+    }
+    case "pay_required_minimum": {
+      const m = action.targetFieldPath?.match(/^debt:(.+)\.minimum$/);
+      const name = m?.[1] ?? "this debt";
+      return `Pay the required minimum of ${moneyOr(action.targetFieldPath ?? "", "the minimum")} on ${name}, due ${dateOr(`debt:${name}.due`, "soon")}.`;
+    }
+    case "review_shortfall_item": {
+      const m = action.targetFieldPath?.match(/^(?:bill|debt):(.+)\.(?:amount|balance)$/);
+      const name = m?.[1] ?? "this item";
+      return `This cycle's plan doesn't fully cover ${name} -- review it.`;
+    }
+    case "review_obligation_options": {
+      const m = action.targetFieldPath?.match(/^(?:bill|debt):(.+)\.(?:amount|balance|minimum)$/);
+      const name = m?.[1] ?? "this item";
+      return `${name} isn't fully covered by the current plan. Review it before its due date, and consider contacting the provider about your options.`;
+    }
+    case "compare_user_priorities":
+      return "That's a genuine choice between real priorities -- worth deciding intentionally.";
+    case "review_reserved_fund": {
+      const m = action.targetFieldPath?.match(/^reserved:(.+)\.(?:amount|tapped)$/);
+      const name = m?.[1] ?? "this reserved fund";
+      return `Worth a look: your ${name} reserved fund.`;
+    }
+    case "no_action_needed":
+      return "Nothing needs doing right now -- the plan is fully covered.";
+  }
+}
+
+/** A structured decision, one option at a time -- validated the same
+ *  "closed vocabulary + real-state precondition" way as an action. */
 function validateDecisionOption(
   option: DecisionOption,
   payload: Record<string, unknown>,
@@ -825,6 +1201,26 @@ function validateDecision(
       "a structured decision requires at least two real options -- that's what makes it a choice",
     );
   }
+  const seen = new Set<string>();
+  for (const o of decision.options) {
+    const key = `${o.code}:${o.targetFieldPath ?? ""}`;
+    if (seen.has(key)) {
+      return fail(
+        "decision options must be distinct -- two copies of the same option is not a real choice",
+      );
+    }
+    seen.add(key);
+  }
+  // Discretionary gate: a values tradeoff between real priorities is
+  // only offered when the plan actually supports discretion. A real
+  // shortfall is never offered as equivalent to a genuine preference.
+  const snap = (payload.snapshot ?? {}) as Record<string, unknown>;
+  const funding = snap.funding as { shortfall?: number } | undefined;
+  if (snap.complete !== true || (typeof funding?.shortfall === "number" && funding.shortfall > 0)) {
+    return fail(
+      "a discretionary decision requires the plan to be complete with no real shortfall -- a real shortfall must be reviewed first, not offered as an equivalent choice",
+    );
+  }
   for (const option of decision.options) {
     const verdict = validateDecisionOption(option, payload);
     if (!verdict.ok) return verdict;
@@ -832,36 +1228,91 @@ function validateDecision(
   return { ok: true };
 }
 
+/** BudgetChek's own authoritative, neutral framing of a validated
+ *  decision -- the model explains context; this is the choice itself. */
+function optionPhrase(option: DecisionOption): string {
+  const name = extractEntityName(option.targetFieldPath) ?? "this option";
+  switch (option.code) {
+    case "prioritize_goal":
+      return `putting extra toward ${name}`;
+    case "defer_discretionary_goal":
+      return `holding off on ${name} for now`;
+    case "prioritize_extra_debt_payment":
+      return `extra principal on ${name}`;
+    case "preserve_additional_buffer":
+      return "keeping an extra buffer";
+    case "compare_real_priorities":
+      return option.targetFieldPath ? name : "your other real priorities";
+  }
+}
+
+function renderDecisionSentence(
+  decision: StructuredDecision,
+  _payload: Record<string, unknown>,
+): string {
+  const phrases = decision.options.map(optionPhrase);
+  return `The choice is between ${phrases.join(" and ")} -- that's yours to make.`;
+}
+
+// ---------------------------------------------------------------------------
+// Structured `missing` -- replaces free-form model-authored strings so an
+// ungrounded response can never leak arbitrary text into the fallback.
+// ---------------------------------------------------------------------------
+
+function missingPhrase(item: MissingItem): string {
+  const name = extractEntityName(item.targetFieldPath);
+  const of = (word: string) => (name ? `${name}'s ${word}` : `a ${word}`);
+  switch (item.code) {
+    case "missing_due_date":
+      return of("due date");
+    case "missing_amount":
+      return of("amount");
+    case "missing_balance":
+      return of("balance");
+    case "missing_apr":
+      return of("APR");
+    case "missing_minimum":
+      return of("minimum payment");
+    case "missing_other":
+      return "some information";
+  }
+}
+
+function validateMissingItem(item: MissingItem, payload: Record<string, unknown>): ActionVerdict {
+  if (item.targetFieldPath && !resolveFieldPath(item.targetFieldPath, payload)) {
+    return fail(
+      `missing item's targetFieldPath "${item.targetFieldPath}" does not resolve to anything real`,
+    );
+  }
+  return { ok: true };
+}
+
+/** What to show instead of an ungrounded answer, or to name what's
+ *  genuinely missing in an otherwise-grounded one. Renders ONLY from the
+ *  closed MissingCode + a real (or absent) entity name -- there is no
+ *  free-text field here an ungrounded response could use to reach the
+ *  person with arbitrary model-authored content. */
+export function safeFallback(missing: MissingItem[]): string {
+  if (missing.length > 0) {
+    return `I don't have enough information to answer that without guessing. Specifically, I don't have: ${missing.map(missingPhrase).join(", ")}. Add that in Your Numbers and ask again.`;
+  }
+  return "I don't have enough information to answer that without guessing, and I'd rather say so than make something up. Try asking about a specific bill, balance, or date you've already entered.";
+}
+
 // ---------------------------------------------------------------------------
 // Injection defenses that don't depend on any number being wrong --
-// unchanged from round 2, kept as defense-in-depth (see checkGrounding).
+// unchanged from round 2/3, kept as defense-in-depth (see checkGrounding).
 // ---------------------------------------------------------------------------
 
 export const UNTRUSTED_DATA_START = "BEGIN UNTRUSTED FINANCIAL DATA (JSON)";
 export const UNTRUSTED_DATA_END = "END UNTRUSTED FINANCIAL DATA";
 
-/** Neutralizes a literal occurrence of the real delimiter markers inside
- *  user-entered text, so nothing typed into a bill/account/goal name can
- *  ever be mistaken by the prompt structure for an actual boundary --
- *  applied to the snapshot JSON before it's ever wrapped in the real
- *  markers. Deterministic, testable, and independent of model behavior. */
 export function sanitizeDelimiterInjection(snapshotJson: string): string {
   return snapshotJson
     .replace(new RegExp(escapeRegex(UNTRUSTED_DATA_START), "gi"), "[blocked marker text]")
     .replace(new RegExp(escapeRegex(UNTRUSTED_DATA_END), "gi"), "[blocked marker text]");
 }
 
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/** Phrase shapes that show up in "make the assistant say/do something"
- *  attacks that don't require any invented number -- an injected label
- *  telling the model to recommend closing accounts, or containing the
- *  literal delimiter text, has no wrong dollar figure to catch. This scans
- *  the untrusted snapshot text ONCE, server-side, before the model ever
- *  sees it, and returns the flagged spans (with surrounding context) so
- *  the model's eventual answer can be checked for verbatim overlap. */
 const INJECTION_PATTERNS = [
   /ignore (all|previous|the) (rules|instructions|plan)/i,
   /disregard (all|the|previous)/i,
@@ -889,11 +1340,6 @@ export function detectInjectionSpans(rawSnapshotJson: string): string[] {
   return spans;
 }
 
-/** True if the model's answer substantially reproduces a flagged span --
- *  a correctly-behaving model never needs to quote injected text at
- *  length; it names that a label looked suspicious without repeating it
- *  (see the system prompt). Any real overlap means the injected text made
- *  it into the answer one way or another. */
 export function answerEchoesInjectedSpan(answer: string, spans: string[]): boolean {
   const normAnswer = answer.toLowerCase().replace(/\s+/g, " ");
   for (const span of spans) {
@@ -908,18 +1354,11 @@ export function answerEchoesInjectedSpan(answer: string, spans: string[]): boole
   return false;
 }
 
-/** A second, independent line of defense for the SAME class of attack --
- *  an injected instruction the model complies with in its OWN words,
- *  paraphrased rather than quoted, would slip past answerEchoesInjectedSpan
- *  (verbatim overlap only). This scans the OUTPUT itself for sweeping,
- *  absolute financial directives ("close ALL your accounts", "empty your
- *  savings") that the deterministic engine's own rules never produce --
- *  kept as defense-in-depth per this round's instruction, NOT as the
- *  primary action-safety mechanism (that's validateAction() above, which
- *  gates the structured action against real state; this only screens the
- *  free-form "answer" prose alongside it). Deliberately scoped to
- *  SWEEPING language ("all", "every", "everything") so an ordinary answer
- *  about a single named account or bill is never caught by it. */
+/** Defense-in-depth (per instruction, not the primary mechanism -- the
+ *  closed ActionCode/DecisionCode vocabularies and the entity-authority
+ *  scan above are). Catches the responsible-obligation guardrail's
+ *  target intent slipping into free prose that never invokes the
+ *  structured action/decision machinery at all. */
 const UNSUPPORTED_DIRECTIVE_PATTERNS = [
   /clos(e|ing)\s+(all|every)\s+(your\s+)?accounts?/i,
   /empty(ing)?\s+(your\s+|the\s+)?(savings|reserved|emergency fund)/i,
@@ -928,15 +1367,8 @@ const UNSUPPORTED_DIRECTIVE_PATTERNS = [
   /cancel(l?ing)?\s+(all|every)\s+(your\s+)?(bills?|payments?|autopay)/i,
   /stop paying (all|everything|your bills)/i,
   /take (all|everything) out of/i,
-
-  // The permanent responsible-obligation guardrail (defense-in-depth --
-  // the PRIMARY defense is that neither ActionCode nor DecisionCode
-  // contains anything meaning "skip"/"ignore"/"pay late"; this net
-  // catches the same intent slipping into free prose instead).
-  // BudgetChek must never originate, normalize, or recommend
-  // intentionally missing, ignoring, abandoning, or making late a known
-  // financial responsibility merely to make a plan appear workable.
   /\bskip\s+(your\s+|the\s+)?(rent|mortgage|payment|bill|premium|minimum)/i,
+  /\bskip\s+it\b/i,
   /\bdon'?t\s+pay\s+(the\s+|your\s+)?\w/i,
   /\bignore\s+(the\s+|your\s+|a\s+|an\s+|any\s+)?(\S+\s+){0,5}(bills?|payments?|invoices?|taxe?s?|obligations?|debts?|responsibilit(y|ies))\b/i,
   /\b(let|allow)\s+.{0,30}\b(go\s+late|become\s+late|go\s+delinquent|lapse)\b/i,
@@ -945,8 +1377,6 @@ const UNSUPPORTED_DIRECTIVE_PATTERNS = [
   /\buse\s+(the\s+|your\s+)?(rent|mortgage|insurance)\s+money\s+(for|toward)/i,
   /\b(intentionally|deliberately)\s+miss(ing)?\s+(the\s+|your\s+)?(required\s+)?(minimum\s+)?payment/i,
   /\babandon(ing)?\s+(the\s+|your\s+)?(payment|obligation|bill|responsibility)/i,
-  // Endorsing lateness/skipping in BudgetChek's own voice, rather than
-  // just acknowledging it as the person's own stated choice.
   /\b(paying|being|going)\s+\S+\s+late\s+(is|would be)\s+(the\s+)?(best|right|smart|good)\s+(move|choice|idea|option)/i,
   /\bgo\s+ahead\s+and\s+skip\b/i,
 ];
@@ -960,19 +1390,12 @@ export function containsUnsupportedDirective(answer: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Qualitative / state-claim grounding -- the numeric grounding above only
-// scans for $/%/date-shaped tokens, so a claim with no financial figure
-// at all ("Rent is already paid", "you have five bills") could bypass it
-// entirely regardless of whether the model bothered to route it through a
-// claim. These two checks run on the rendered text directly, keyed to the
-// REAL entity names and counts in the payload -- not a generic phrase
-// list -- so they stay structural rather than becoming a bigger regex.
+// Qualitative / state-claim grounding -- round 4's free-text scans, kept
+// running as defense-in-depth alongside this round's structured "state"
+// claim kind (see resolveStateClaim above), per instruction to keep this
+// coverage rather than remove it.
 // ---------------------------------------------------------------------------
 
-/** For every real bill, checks whether the rendered text asserts a
- *  paid/unpaid state for it by name, and if so, that the assertion
- *  matches the real `paid` value. Scoped to bills (the only entity with
- *  a real `paid` field today). */
 function checkPaidStateClaims(rendered: string, payload: Record<string, unknown>): string | null {
   const bills = payload.bills;
   if (!Array.isArray(bills)) return null;
@@ -1015,8 +1438,6 @@ const COUNT_WORDS: Record<string, number> = {
 const ENTITY_COUNT_RE =
   /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(bills?|debts?|goals?)\b/gi;
 
-/** Checks any "N bills"/"N debts"/"N goals" assertion in the rendered
- *  text against the REAL count of that entity type in the payload. */
 function checkEntityCountClaims(rendered: string, payload: Record<string, unknown>): string | null {
   const counts: Record<string, number> = {
     bill: Array.isArray(payload.bills) ? payload.bills.length : 0,
@@ -1062,55 +1483,13 @@ export function checkGrounding(
     return { grounded: false, reason: "snapshot did not parse as JSON" };
   }
 
-  // Defense #1: resolve the template directly from real data. There is no
-  // reverse-validation step -- every figure in the rendered text came
-  // from BudgetChek's own lookup, never from the model.
-  const rendered = renderAnswerTemplate(
-    response.answer,
-    response.claims,
-    payload,
-    ctx.currentUserMessage,
-  );
-  if (!rendered.ok) {
-    return { grounded: false, reason: rendered.reason, offendingToken: rendered.offendingToken };
-  }
-
-  // Defense #2a: sweeping, unsupported financial directives in the
-  // rendered prose (defense-in-depth, not primary -- see comment above).
-  const unsupportedDirective = containsUnsupportedDirective(rendered.rendered);
-  if (unsupportedDirective) {
-    return {
-      grounded: false,
-      reason: "answer contains a sweeping, unsupported financial directive",
-      offendingToken: unsupportedDirective,
-    };
-  }
-
-  // Defense #2b: qualitative instruction-following via verbatim overlap.
-  if (answerEchoesInjectedSpan(rendered.rendered, ctx.injectedSpans)) {
-    return { grounded: false, reason: "answer substantially echoes a flagged injected span" };
-  }
-
-  // Defense #2c/#2d: qualitative STATE claims -- paid/unpaid and entity
-  // counts -- checked directly against the real payload, independent of
-  // whether the model routed them through a claim placeholder at all
-  // (neither contains a $/%/date token, so the raw-figure ban alone
-  // can't catch a fabricated one).
-  const paidStateProblem = checkPaidStateClaims(rendered.rendered, payload);
-  if (paidStateProblem) {
-    return { grounded: false, reason: paidStateProblem };
-  }
-  const countProblem = checkEntityCountClaims(rendered.rendered, payload);
-  if (countProblem) {
-    return { grounded: false, reason: countProblem };
-  }
-
-  // Defense #3: the recommended action itself must be a real, deterministic-
-  // state-validated action -- a resolvable target alone is not enough.
+  // Defense #1: the recommended action/decision itself must be real,
+  // deterministic-state-validated -- checked BEFORE rendering, so the
+  // authoritative sentence generated below is only ever generated for
+  // something that actually passed.
   if (response.nextActionType === "concrete_action") {
-    if (!response.action) {
+    if (!response.action)
       return { grounded: false, reason: "concrete_action requires a structured action" };
-    }
     const actionVerdict = validateAction(response.action, payload);
     if (!actionVerdict.ok) {
       return {
@@ -1120,19 +1499,47 @@ export function checkGrounding(
       };
     }
   }
-
-  // Defense #4: close the user_decision bypass -- a "decision" is only
-  // ever a validated choice BETWEEN real, closed-vocabulary options,
-  // never an unsupported directive wearing a different nextActionType.
   if (response.nextActionType === "user_decision") {
-    if (!response.decision) {
+    if (!response.decision)
       return { grounded: false, reason: "user_decision requires a structured decision" };
-    }
     const decisionVerdict = validateDecision(response.decision, payload);
-    if (!decisionVerdict.ok) {
-      return { grounded: false, reason: decisionVerdict.reason };
-    }
+    if (!decisionVerdict.ok) return { grounded: false, reason: decisionVerdict.reason };
   }
+  for (const item of response.missing) {
+    const v = validateMissingItem(item, payload);
+    if (!v.ok) return { grounded: false, reason: v.reason };
+  }
+
+  // Defense #2: resolve the template directly from real data -- entity
+  // identity and value both authored by BudgetChek, and the model's own
+  // validated next step rendered from ActionCode/DecisionCode, not from
+  // free prose. No reverse-validation step: there is nothing left to
+  // reverse-validate, because none of this text came from the model.
+  const rendered = renderAnswerTemplate(response, payload, ctx.currentUserMessage);
+  if (!rendered.ok) {
+    return { grounded: false, reason: rendered.reason, offendingToken: rendered.offendingToken };
+  }
+
+  // Defense #3a: sweeping, unsupported financial directives (defense-in-
+  // depth -- see comment on UNSUPPORTED_DIRECTIVE_PATTERNS above).
+  const unsupportedDirective = containsUnsupportedDirective(rendered.rendered);
+  if (unsupportedDirective) {
+    return {
+      grounded: false,
+      reason: "answer contains a sweeping, unsupported financial directive",
+      offendingToken: unsupportedDirective,
+    };
+  }
+  // Defense #3b: qualitative instruction-following via verbatim overlap.
+  if (answerEchoesInjectedSpan(rendered.rendered, ctx.injectedSpans)) {
+    return { grounded: false, reason: "answer substantially echoes a flagged injected span" };
+  }
+  // Defense #3c/#3d: round-4 free-text qualitative scans, kept as
+  // defense-in-depth alongside the structured "state" claim kind.
+  const paidStateProblem = checkPaidStateClaims(rendered.rendered, payload);
+  if (paidStateProblem) return { grounded: false, reason: paidStateProblem };
+  const countProblem = checkEntityCountClaims(rendered.rendered, payload);
+  if (countProblem) return { grounded: false, reason: countProblem };
 
   return {
     grounded: true,
@@ -1141,23 +1548,11 @@ export function checkGrounding(
   };
 }
 
-/** What to show instead of an ungrounded answer. Never exposes model or
- *  transport internals -- only names the missing input when the model
- *  actually declared one. */
-export function safeFallback(missing: string[]): string {
-  if (missing.length > 0) {
-    return `I don't have enough information to answer that without guessing. Specifically, I don't have: ${missing.join(", ")}. Add that in Your Numbers and ask again.`;
-  }
-  return "I don't have enough information to answer that without guessing, and I'd rather say so than make something up. Try asking about a specific bill, balance, or date you've already entered.";
-}
-
 // ---------------------------------------------------------------------------
 // The strict response contract -- lives here, not in mm-chat.functions.ts,
 // so it is a pure, testable unit like everything else in this module. No
 // .catch(...) anywhere: a malformed claim, an invalid enum value, or a
-// missing required field means the WHOLE response fails to parse --
-// parseContract returns null, and the caller falls straight to the safe
-// fallback.
+// missing required field means the WHOLE response fails to parse.
 // ---------------------------------------------------------------------------
 
 const ACTION_CODES = [
@@ -1180,15 +1575,36 @@ const DECISION_CODES = [
   "compare_real_priorities",
 ] as const;
 
+const STATE_CODES = [
+  "bill_paid",
+  "bill_unpaid",
+  "plan_complete",
+  "plan_incomplete",
+  "has_shortfall",
+  "no_shortfall",
+  "due_present",
+  "due_missing",
+  "in_window",
+  "out_of_window",
+  "reserved_tapped",
+  "reserved_not_tapped",
+] as const;
+
+const MISSING_CODES = [
+  "missing_due_date",
+  "missing_amount",
+  "missing_balance",
+  "missing_apr",
+  "missing_minimum",
+  "missing_other",
+] as const;
+
 const ClaimSchema = z.object({
-  label: z.string().min(1),
-  kind: z.enum(["fact", "derived", "user_input"]),
-  // Required for "fact"/"derived", absent for "user_input" -- enforced
-  // as a cross-field rule in parseContract below, not at the schema
-  // level, so the specific reason is easy to log.
+  kind: z.enum(["fact", "derived", "user_input", "state"]),
   fieldPath: z.string().min(1).optional(),
   operation: z.enum(["add", "subtract"]).optional(),
   userOperand: z.string().min(1).optional(),
+  stateCode: z.enum(STATE_CODES).optional(),
 });
 
 const ActionSchema = z.object({
@@ -1205,10 +1621,15 @@ const DecisionSchema = z.object({
   options: z.array(DecisionOptionSchema),
 });
 
+const MissingItemSchema = z.object({
+  code: z.enum(MISSING_CODES),
+  targetFieldPath: z.string().min(1).optional(),
+});
+
 const AskResponseSchema = z.object({
   answer: z.string().min(1),
   claims: z.array(ClaimSchema),
-  missing: z.array(z.string()),
+  missing: z.array(MissingItemSchema),
   nextActionType: z.enum([
     "concrete_action",
     "user_decision",
@@ -1221,14 +1642,12 @@ const AskResponseSchema = z.object({
 });
 
 /** Parses the model's raw text into the strict contract, or null if it
- *  doesn't conform -- including the cross-field rules that
- *  "concrete_action" requires a structured action and "user_decision"
- *  requires a structured decision with at least two options (closing the
- *  bypass where an unsupported recommendation became valid merely by
- *  being labeled a decision instead of an action). Tolerant of
- *  surrounding prose/markdown fences around the JSON object (the same
- *  brace-extraction mm-vision.functions.ts already uses), but never
- *  tolerant of the shape once found. */
+ *  doesn't conform -- including every cross-field rule: "concrete_action"
+ *  requires a structured action, "user_decision" requires a structured
+ *  decision with >= 2 options, "fact"/"derived" claims require a
+ *  fieldPath, "user_input" claims require a userOperand, "state" claims
+ *  require a stateCode. Tolerant of surrounding prose/markdown fences
+ *  around the JSON object, never tolerant of the shape once found. */
 export function parseContract(raw: string): AskResponseContract | null {
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) return null;
@@ -1246,6 +1665,7 @@ export function parseContract(raw: string): AskResponseContract | null {
     for (const claim of result.data.claims) {
       if ((claim.kind === "fact" || claim.kind === "derived") && !claim.fieldPath) return null;
       if (claim.kind === "user_input" && !claim.userOperand) return null;
+      if (claim.kind === "state" && !claim.stateCode) return null;
     }
     return result.data;
   } catch {
@@ -1254,22 +1674,13 @@ export function parseContract(raw: string): AskResponseContract | null {
 }
 
 // ---------------------------------------------------------------------------
-// External-service error normalization -- a small, closed set of
-// user-facing messages. No upstream response body, HTTP status detail,
-// workspace/credit wording, or provider/secret name is ever returned by
-// this function; it only ever produces one of exactly two fixed strings,
-// by construction (the caller's raw error/body is for server-side logging
-// only, and deliberately isn't even a parameter here that could leak
-// through).
+// External-service error normalization -- unchanged from round 3.
 // ---------------------------------------------------------------------------
 
 export const GENERIC_UNAVAILABLE =
   "The assistant isn't available right now. Try again in a moment.";
 export const RATE_LIMITED = "Too many requests right now. Try again shortly.";
 
-/** status: the upstream HTTP status, or null for a network-level failure
- *  (fetch threw) or an unparseable/empty response. Returns one of exactly
- *  two fixed strings -- never anything derived from the input. */
 export function classifyTransportError(status: number | null): string {
   return status === 429 ? RATE_LIMITED : GENERIC_UNAVAILABLE;
 }
