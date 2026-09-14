@@ -114,6 +114,7 @@ export function useMoneyState(userId: string, namedConstraints: { label: string;
     expenses: expenses.data ?? [],
     debts: debts.data ?? [],
     goals: goals.data ?? [],
+    deposits: deposits.data ?? [],
     savedByGoal,
     engineInput,
     snapshot,
