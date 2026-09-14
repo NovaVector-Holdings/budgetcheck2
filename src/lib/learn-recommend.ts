@@ -68,8 +68,9 @@ export function recommendLesson(args: RecommendArgs): { lesson: Lesson; because:
   // and none of the five lessons on file is specifically about spending-cap
   // or credit-limit discipline. Per the CEO's ruling, forcing a lesson onto
   // a condition with no genuinely relevant one is worse than showing none --
-  // this condition falls through to whatever matches below, or the gentle
-  // default, rather than being assigned a match of convenience.
+  // this condition does not create a recommendation of its own; evaluation
+  // continues to any genuinely matching rule below, otherwise the function
+  // returns null.
 
   const highAprDebt = args.debts.find((d) => Number(d.apr ?? 0) >= HIGH_APR);
   if (highAprDebt) {
