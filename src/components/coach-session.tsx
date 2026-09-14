@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { addMonths, fmt, today, type MoneyMeeting } from "@/lib/money";
+import { addMonths, fmt, getMeetingKind, today, type MoneyMeeting } from "@/lib/money";
 import { evaluateDebt, formatDay, FUNDING_TIERS } from "@/lib/decision-engine";
 import { parseStatement, reviewStatement, type Txn } from "@/lib/statement-review";
 import { computeChangesSince } from "@/lib/changes-since";
@@ -19,11 +19,7 @@ import { Loader2 } from "lucide-react";
 type MoneyState = ReturnType<typeof useMoneyState>;
 type Step = "intro" | "file" | "balances" | "report";
 
-/** Distinguishes a monthly-review record from a weekly check-in -- both are
- *  saved into the same money_meetings table. See weekly-check-in.tsx for the
- *  mirror-image discriminator. */
-const isMonthlyRecord = (m: MoneyMeeting) =>
-  (m.checklist ?? []).some((c) => c.label === "Brought a statement to review");
+const isMonthlyRecord = (m: MoneyMeeting) => getMeetingKind(m) === "monthly";
 
 function Coach({ line, sub }: { line: string; sub?: string }) {
   return (
@@ -175,8 +171,8 @@ export function CoachSession({
 
   const shortfall = !!snapshot.funding && snapshot.funding.available - snapshot.funding.totalRequested < 0;
   const recommendation = useMemo(
-    () => recommendLesson({ shortfall, goals, savedByGoal, debts, caps }),
-    [shortfall, goals, savedByGoal, debts, caps],
+    () => recommendLesson({ shortfall, goals, savedByGoal, debts }),
+    [shortfall, goals, savedByGoal, debts],
   );
 
   const finish = useMutation({
@@ -229,7 +225,7 @@ export function CoachSession({
 
       const { error } = await supabase.from("money_meetings").insert({
         user_id: userId,
-        checklist: JSON.parse(JSON.stringify(checklist)),
+        checklist: JSON.parse(JSON.stringify({ kind: "monthly", items: checklist })),
         notes: summary || null,
       });
       if (error) throw error;

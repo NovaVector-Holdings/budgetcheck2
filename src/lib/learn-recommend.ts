@@ -7,8 +7,7 @@
 
 import { HIGH_APR } from "@/lib/decision-engine";
 import { lessons, type Lesson } from "@/lib/lessons";
-import type { Debt, SavingsGoal, SavingsDeposit } from "@/lib/money";
-import type { MmSpendingCap } from "@/lib/mm";
+import type { Debt, SavingsGoal } from "@/lib/money";
 
 const byId = (id: string) => lessons.find((l) => l.id === id) ?? null;
 
@@ -18,8 +17,21 @@ export interface RecommendArgs {
   goals: SavingsGoal[];
   savedByGoal: Map<string, number>;
   debts: Debt[];
-  caps: MmSpendingCap[];
 }
+
+/**
+ * Final rule table (top match wins, one lesson, never more than one):
+ *
+ * | # | Condition                                    | Lesson              |
+ * |---|-----------------------------------------------|----------------------|
+ * | 1 | Shortfall this cycle                          | budget-basics        |
+ * | 2 | Starter emergency-fund goal < 50% funded      | emergency-fund        |
+ * | 3 | A debt at/above HIGH_APR (15%)                | investing-roadmap    |
+ * | 4 | None of the above                             | credit-score (default) |
+ *
+ * A spending-cap/instrument-limit structural gap does NOT appear in this
+ * table on purpose -- see the comment at that removed branch below.
+ */
 
 /**
  * "starter emergency fund" is matched by name (the app has no goal "type"
@@ -46,21 +58,23 @@ export function recommendLesson(args: RecommendArgs): { lesson: Lesson; because:
     if (lesson) return { lesson, because: "Your starter emergency fund still has real room to go." };
   }
 
-  // A structural gap (the card behind a cap allows more than the cap) is the
-  // closest deterministic signal to "a pattern worth a second look" this
-  // prototype can compute without multi-month imported statement history.
-  const structuralGap = args.caps.find(
-    (c) => c.instrument_limit != null && Number(c.instrument_limit) > Number(c.cap_amount),
-  );
-  if (structuralGap) {
-    const lesson = byId("spot-scams");
-    if (lesson) return { lesson, because: "One of your spending caps doesn't match the card behind it." };
-  }
+  // Deliberately no branch here for a spending-cap/instrument-limit
+  // mismatch: that's a budgeting-discipline signal, not evidence of a scam,
+  // and none of the five lessons on file is specifically about spending-cap
+  // or credit-limit discipline. Per the CEO's ruling, forcing a lesson onto
+  // a condition with no genuinely relevant one is worse than showing none --
+  // this condition falls through to whatever matches below, or the gentle
+  // default, rather than being assigned a match of convenience.
 
   const highAprDebt = args.debts.find((d) => Number(d.apr ?? 0) >= HIGH_APR);
   if (highAprDebt) {
     const lesson = byId("investing-roadmap");
-    if (lesson) return { lesson, because: `${highAprDebt.name} is charging ${highAprDebt.apr}% — worth clearing before anything else competes for the same dollar.` };
+    if (lesson) {
+      return {
+        lesson,
+        because: `${highAprDebt.name} is charging ${highAprDebt.apr}% interest, so it may be worth reviewing before putting extra money toward investing.`,
+      };
+    }
   }
 
   const lesson = byId("credit-score");

@@ -1,7 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { DEFAULT_MEETING_CHECKLIST, fmt, type MeetingChecklistItem, type MoneyMeeting } from "@/lib/money";
+import {
+  DEFAULT_MEETING_CHECKLIST,
+  fmt,
+  getMeetingItems,
+  getMeetingKind,
+  type MeetingChecklistItem,
+  type MoneyMeeting,
+} from "@/lib/money";
 import { formatDay, FUNDING_TIERS } from "@/lib/decision-engine";
 import { computeChangesSince } from "@/lib/changes-since";
 import { recommendLesson } from "@/lib/learn-recommend";
@@ -15,11 +22,7 @@ import { ArrowRight, CheckCircle2 } from "lucide-react";
 
 type MoneyState = ReturnType<typeof useMoneyState>;
 
-/** Distinguishes the monthly-review record shape from the weekly one --
- *  both are saved into the same money_meetings table, so this is how a
- *  weekly check-in knows to only diff against a PRIOR weekly check-in. */
-const isMonthlyRecord = (m: MoneyMeeting) =>
-  (m.checklist ?? []).some((c) => c.label === "Brought a statement to review");
+const isWeeklyRecord = (m: MoneyMeeting) => getMeetingKind(m) === "weekly";
 
 function Section({ eyebrow, title, children }: { eyebrow: string; title?: string; children: React.ReactNode }) {
   return (
@@ -49,7 +52,7 @@ export function WeeklyCheckIn({ userId, state, onGoToData }: { userId: string; s
     },
   });
 
-  const lastWeekly = useMemo(() => meetings.find((m) => !isMonthlyRecord(m)) ?? null, [meetings]);
+  const lastWeekly = useMemo(() => meetings.find(isWeeklyRecord) ?? null, [meetings]);
 
   const changes = useMemo(
     () =>
@@ -81,15 +84,19 @@ export function WeeklyCheckIn({ userId, state, onGoToData }: { userId: string; s
         goals: state.goals,
         savedByGoal: state.savedByGoal,
         debts: state.debts,
-        caps: state.caps,
       }),
-    [shortfall, state.goals, state.savedByGoal, state.debts, state.caps],
+    [shortfall, state.goals, state.savedByGoal, state.debts],
   );
 
+  // Estimated remaining is a calculated RESULT (what's left after
+  // obligations and buffer) -- it must never be restated as the amount the
+  // user is told to set aside. The holdback instruction names the actual
+  // obligations total (funding.totalRequested); estimated remaining is
+  // reported separately, still framed as an estimate.
   const focusLine = shortfall
     ? `Close the gap at ${cutoffItem?.label ?? "the cutoff line"} before anything else competes for the same dollar.`
-    : funding && funding.items.length > 0
-      ? `Keep ${fmt(funding.available - funding.totalRequested)} clear until ${funding.items[0]?.dueDate ? formatDay(funding.items[0].dueDate) : "your next bill"}.`
+    : funding && funding.items.length > 0 && snap.window
+      ? `Keep the ${fmt(funding.totalRequested)} due through ${formatDay(snap.window.end)} covered. Your estimated remaining after that and your buffer is ${fmt(remaining ?? 0)}.`
       : "Nothing urgent this week — a good week to move something toward a goal instead.";
 
   const doneCount = checklist.filter((c) => c.done).length;
@@ -98,7 +105,7 @@ export function WeeklyCheckIn({ userId, state, onGoToData }: { userId: string; s
     mutationFn: async () => {
       const { error } = await supabase.from("money_meetings").insert({
         user_id: userId,
-        checklist: JSON.parse(JSON.stringify(checklist)),
+        checklist: JSON.parse(JSON.stringify({ kind: "weekly", items: checklist })),
         notes: notes.trim() || null,
       });
       if (error) throw error;
@@ -122,8 +129,8 @@ export function WeeklyCheckIn({ userId, state, onGoToData }: { userId: string; s
             <ArrowRight className="ml-1.5 h-4 w-4" aria-hidden />
           </Button>
         </div>
-        {meetings.filter((m) => !isMonthlyRecord(m)).length > 0 && (
-          <PastCheckIns meetings={meetings.filter((m) => !isMonthlyRecord(m))} />
+        {meetings.filter(isWeeklyRecord).length > 0 && (
+          <PastCheckIns meetings={meetings.filter(isWeeklyRecord)} />
         )}
       </div>
     );
@@ -323,12 +330,13 @@ function PastCheckIns({ meetings }: { meetings: MoneyMeeting[] }) {
       <h2 className="font-serif text-lg text-ink">Past check-ins</h2>
       <ul className="mt-3 space-y-3">
         {meetings.slice(0, 8).map((m) => {
-          const done = (m.checklist ?? []).filter((c) => c.done).length;
+          const items = getMeetingItems(m);
+          const done = items.filter((c) => c.done).length;
           return (
             <li key={m.id} className="paper-card p-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-ink">{m.held_on}</span>
-                <span className="text-xs text-muted-foreground">{done}/{(m.checklist ?? []).length} done</span>
+                <span className="text-xs text-muted-foreground">{done}/{items.length} done</span>
               </div>
               {m.notes && <p className="mt-2 text-sm text-muted-foreground">{m.notes}</p>}
             </li>

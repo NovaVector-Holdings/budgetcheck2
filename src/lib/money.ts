@@ -75,14 +75,63 @@ export interface MeetingChecklistItem {
   done: boolean;
 }
 
+export type MoneyMeetingKind = "weekly" | "monthly";
+
+/** What every new money_meetings row's `checklist` column stores: an
+ *  explicit, stable record type alongside the actual checklist items. See
+ *  getMeetingKind()/getMeetingItems() for why the column type below also
+ *  accepts a bare array. */
+export interface MoneyMeetingChecklistPayload {
+  kind: MoneyMeetingKind;
+  items: MeetingChecklistItem[];
+}
+
 export interface MoneyMeeting {
   id: string;
   user_id: string;
   held_on: string;
-  checklist: MeetingChecklistItem[];
+  /**
+   * Rows saved before this discriminator existed store a bare
+   * MeetingChecklistItem[] with no record-type field at all. Every row
+   * saved from here on stores MoneyMeetingChecklistPayload instead, with an
+   * explicit `kind`. Always read through getMeetingKind()/getMeetingItems()
+   * rather than touching this field directly -- they handle both shapes.
+   */
+  checklist: MeetingChecklistItem[] | MoneyMeetingChecklistPayload;
   notes: string | null;
   archived: boolean;
   created_at: string;
+}
+
+function isWrappedChecklist(c: MoneyMeeting["checklist"]): c is MoneyMeetingChecklistPayload {
+  return !!c && !Array.isArray(c) && typeof c === "object" && "items" in c;
+}
+
+/** The actual checklist items, regardless of which shape this row used. */
+export function getMeetingItems(m: MoneyMeeting): MeetingChecklistItem[] {
+  const c = m.checklist;
+  if (isWrappedChecklist(c)) return c.items ?? [];
+  return Array.isArray(c) ? c : [];
+}
+
+/**
+ * Stable, machine-readable record type -- weekly vs. monthly.
+ *
+ * Legacy handling: rows saved before this discriminator existed have no
+ * `kind` field at all (a bare array). For those ONLY, this falls back to a
+ * one-time compatibility check on the exact monthly-only checklist label
+ * ("Brought a statement to review") that the old monthly flow always wrote.
+ * Every row saved going forward carries an explicit `kind` and never
+ * touches this fallback. A legacy row matching neither pattern defaults to
+ * "weekly" -- the only flow that existed before monthly review shipped, so
+ * it's the only thing an unlabeled legacy row could be.
+ */
+export function getMeetingKind(m: MoneyMeeting): MoneyMeetingKind {
+  const c = m.checklist;
+  if (isWrappedChecklist(c)) return c.kind;
+  const items = Array.isArray(c) ? c : [];
+  const isLegacyMonthly = items.some((i) => i.label === "Brought a statement to review");
+  return isLegacyMonthly ? "monthly" : "weekly";
 }
 
 export interface AlertSettings {
