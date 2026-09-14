@@ -359,10 +359,10 @@ function Home() {
           </div>
           <div className="space-y-4 text-base leading-relaxed text-foreground">
             <p>
-              Every lesson and resource on BudgetChek is tracked against the federal agency, state
-              or local government office, or established nonprofit that actually publishes it —
-              CFPB, the SEC, FDIC, FTC, IRS, HHS, United Way (211), NFCC, and others — and the
-              source link sits on the card itself, not buried in a footnote.
+              Every lesson and resource in Learn Money is tracked to a named source — federal,
+              state, or local government agencies, established nonprofits, or other approved
+              public-service sources — and the source link appears with the content, not buried in a
+              footnote.
             </p>
             <p>
               Our audio lessons are plain-language summaries checked against that material, not
@@ -371,8 +371,9 @@ function Home() {
               regulator's mouth.
             </p>
             <p>
-              We do not sell anything. We do not take affiliate fees. If a resource isn&rsquo;t free
-              or doesn&rsquo;t come from a source we can name, it doesn&rsquo;t go on the page.
+              Learn Money does not use paid placements or affiliate links. If a resource isn&rsquo;t
+              free or doesn&rsquo;t come from a source we can identify and review, it doesn&rsquo;t
+              go in Learn Money.
             </p>
           </div>
         </div>
