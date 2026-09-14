@@ -11,6 +11,11 @@ export type Lesson = {
   minutes: number;
   source: string;
   sourceUrl: string;
+  /** For a lesson that draws on more than one named source (e.g. a claim
+   *  the primary source doesn't itself cover) -- rendered alongside the
+   *  primary source link so a multi-source lesson never pretends to have
+   *  only one. Omit entirely for single-source lessons. */
+  additionalSources?: { source: string; sourceUrl: string }[];
   takeaways: string[];
   script: string; // narrated text
   /** Closes the Learn -> Apply loop: where in Money Meeting this lesson's
@@ -32,7 +37,7 @@ export const lessons: Lesson[] = [
       "Review and adjust the plan every month — it is meant to change.",
     ],
     script:
-      "Welcome. In this short lesson we will walk through how to build your first budget, using the framework the Consumer Financial Protection Bureau publishes in its Your Money Your Goals toolkit. " +
+      "Welcome. In this short lesson we will walk through how to build your first budget, drawing on ideas from the cash-flow budgeting tools in the Consumer Financial Protection Bureau's Your Money, Your Goals toolkit. " +
       "A budget is simply a plan for the money you expect to receive and the money you expect to spend. It is not about restriction. It is about visibility. " +
       "Start with three lists. First, the money you actually bring home each month, after taxes. Second, your fixed bills — rent, insurance, loan payments, anything that is the same number every month. Third, flexible spending — groceries, gas, eating out, subscriptions. " +
       "Subtract the fixed bills from your take-home pay. Whatever is left is the pool you have to cover flexible spending, savings, and debt payments. " +
@@ -57,7 +62,7 @@ export const lessons: Lesson[] = [
       "This lesson summarizes a topic covered in the FDIC's free Money Smart for Adults curriculum: the emergency fund. " +
       "An emergency fund is money you set aside specifically for unexpected costs — a car repair, a medical bill, a gap between jobs. " +
       "The reason this comes before paying down most debts is simple. Without a buffer, the next surprise expense almost always gets paid for with a credit card or a high-interest loan, which makes the original debt problem worse. " +
-      "You do not need a large fund to start. The FDIC materials note that even a few hundred dollars can keep a household out of new debt during a typical unexpected expense. " +
+      "You do not need a large fund to start. Even a small starter fund — a few hundred dollars — can be enough to keep a typical unexpected expense from turning into new debt. " +
       "Two practical habits help. First, keep the fund in a separate savings account, ideally one without a debit card attached, so you do not spend it by accident. Second, automate even a small transfer on payday — five, ten, or twenty dollars. Consistency matters more than the amount. " +
       "Once you have a starter fund, the common next goal is to build up to roughly three to six months of essential expenses, but only after higher-interest debt is under control. " +
       "The full Money Smart curriculum is free to download from the FDIC. The link is below.",
@@ -67,21 +72,29 @@ export const lessons: Lesson[] = [
     id: "credit-score",
     title: "What actually moves your credit score",
     minutes: 3,
-    source: "Consumer Financial Protection Bureau · Credit reports & scores",
-    sourceUrl: "https://www.consumerfinance.gov/consumer-tools/credit-reports-and-scores/",
+    source: "Consumer Financial Protection Bureau · Understand your credit score",
+    sourceUrl:
+      "https://www.consumerfinance.gov/consumer-tools/credit-reports-and-scores/understand-your-credit-score/",
+    additionalSources: [
+      {
+        source: "AnnualCreditReport.com (official site, jointly run by the three credit bureaus)",
+        sourceUrl: "https://www.annualcreditreport.com/index.action",
+      },
+    ],
     takeaways: [
-      "Payment history and how much of your available credit you use matter the most.",
-      "You are entitled to free weekly credit reports at AnnualCreditReport.com.",
-      "Errors on your report can be disputed — and they are common.",
+      "Paying bills on time has the greatest impact on your score.",
+      "Staying well below your credit limits also matters.",
+      "If your credit report contains an error, you have the right to dispute it.",
     ],
     script:
       "This is a brief overview of credit scores, drawing on the consumer guidance published by the Consumer Financial Protection Bureau. " +
-      "Your credit score is a three-digit number that lenders use to estimate how likely you are to repay borrowed money. The most influential factors, according to the CFPB, are your payment history — that is, whether you pay your bills on time — and your credit utilization, which is the percentage of your available credit you are actually using. " +
-      "The length of your credit history, the mix of credit types you have, and recent applications for new credit also play a role, but a smaller one. " +
-      "Two practical points. First, you have a legal right to a free copy of your credit report from each of the three nationwide credit bureaus, every week, at annualcreditreport.com. This is the official site authorized by federal law. " +
-      "Second, errors on credit reports are common, and you have the right to dispute them. The CFPB provides free sample dispute letters on its site. " +
+      "Your credit score is a three-digit number that lenders use to estimate how likely you are to repay borrowed money. Paying your bills on time, every time, has the greatest impact on your score, according to the CFPB. " +
+      "Staying well below your credit limit also matters — credit scoring models look at how close you are to being maxed out, and the CFPB suggests keeping your use of credit at no more than 30 percent of your total limit. " +
+      "The length of your credit history and how many accounts you have also play a role, and things like your mix of credit types and recent applications for new credit are commonly cited as smaller factors too. " +
+      "Two practical points. First, if you find something wrong on your credit report, you have the right to dispute it — contact both the credit reporting company and the company that gave them the information, explain what's wrong, and include documents that support your case. " +
+      "Second, you can check your credit report for free every week from each of the three major credit bureaus at AnnualCreditReport.com. " +
       "Improving a credit score is slow but predictable: pay on time, keep balances low relative to limits, and check your reports for mistakes. " +
-      "See the source link for the full CFPB consumer guide.",
+      "See the source links below for the full CFPB guide and AnnualCreditReport.com.",
     applyTo: { tab: "weekly", label: "Bring this to this week's check-in" },
   },
   {
@@ -97,12 +110,12 @@ export const lessons: Lesson[] = [
     ],
     script:
       "This lesson summarizes the SEC's free publication, Saving and Investing: A Roadmap to Your Financial Security. " +
-      "Before investing, the SEC recommends two foundations: pay down high-interest debt, especially credit cards, and build an emergency fund. Investing into the stock market while paying twenty or thirty percent interest on a credit card almost never comes out ahead. " +
+      "Before investing, the SEC recommends two foundations: pay down high-interest debt, especially credit cards, and build an emergency fund. Investing into the stock market while paying eighteen percent or more interest on a credit card almost never comes out ahead — the SEC notes that virtually no investment can reliably beat a credit card rate that high. " +
       "When you are ready to invest, the SEC stresses three ideas that beginners often underestimate. " +
-      "First, time is the most powerful tool you have. Money invested early has decades to compound, and the SEC's own examples show that even modest, regular contributions can grow substantially over thirty or forty years. " +
-      "Second, fees matter more than they look. A one-percent annual fee may sound small, but over a working lifetime it can quietly cost tens of thousands of dollars. Always ask what the total expense ratio is before investing in a fund. " +
+      "First, time is the most powerful tool you have. The SEC gives a simple example: saving $1 a day for one year gives you $365. If that one $365 amount were invested at 5% and left alone, it would grow to about $1,577.50 after 30 years — no additional contributions needed. " +
+      "Second, fees matter more than they look. Fees may sound small, but the SEC's own brochure warns that even small fees can eat into a significant chunk of your returns over the years you hold an investment — so it's worth comparing costs between similar funds. Always ask what a fund actually costs before investing in it. " +
       "Third, diversification — owning many different investments instead of just one — reduces risk, but it does not eliminate it. All investing involves the possibility of loss. " +
-      "The SEC also warns about one of the most common ways people lose money: investment fraud. If an offer promises guaranteed high returns with no risk, or pressures you to act immediately, it is almost certainly a scam. You can verify whether a person or firm is licensed at investor.gov. " +
+      'The SEC also warns about one of the most common ways people lose money: investment fraud. If an offer promises quick profits, dangles "inside information," or pressures you to invest before you\'ve had a chance to look into it, the SEC says those are classic warning signs of fraud. You can check whether a person or firm is registered with the SEC, and confirm their license and disciplinary history with your state securities regulator through NASAA at nasaa.org. ' +
       "The full SEC roadmap is linked below. It is free, and it is one of the clearest beginner guides written by a regulator.",
     applyTo: { tab: "plans", label: "See your debt payoff plan first" },
   },
@@ -119,13 +132,13 @@ export const lessons: Lesson[] = [
     ],
     script:
       "This is a short overview of how to recognize money scams, based on guidance from the Federal Trade Commission. " +
-      "The FTC has identified a small set of patterns that show up in nearly every scam, regardless of the story being told. " +
+      "The FTC lists several common warning signs that show up in most scams, no matter what story the scammer is telling. " +
       "First, the scammer pretends to be someone you would trust — a government agency, a well-known company, a relative, or a romantic interest. " +
       "Second, there is a problem or a prize. You owe money, your account will be closed, you have won something, or a loved one is in trouble. " +
       "Third, you are pressured to act immediately, before you have time to think or check. " +
       "Fourth, you are told to pay in a very specific way: a wire transfer, a gift card, a money-transfer app, or cryptocurrency. These methods are used because they are nearly impossible to reverse. " +
       "No legitimate U.S. government agency, bank, or utility will ever demand payment in gift cards or crypto. If anyone does, it is a scam. " +
-      "If you encounter a scam, or if you have been hit by one, you can report it to the FTC at reportfraud.ftc.gov. Reporting helps the FTC build cases and warn others, even if your own money cannot be recovered. " +
+      "If you encounter a scam, or if you have been hit by one, you can report it to the FTC at reportfraud.ftc.gov. Reporting helps the FTC take action against scammers — the agency says your report could help stop them, even if it can't undo what already happened to you. " +
       "Full guidance is at the source link below.",
     applyTo: { tab: "statements", label: "Review your last statement" },
   },
