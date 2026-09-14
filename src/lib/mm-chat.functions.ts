@@ -119,7 +119,11 @@ export const askMoneyMeeting = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => Input.parse(d))
   .handler(async ({ data }) => {
     const key = process.env.LOVABLE_API_KEY;
-    if (!key) throw new Error("Missing LOVABLE_API_KEY");
+    // Deliberately generic: the previous message here was the literal env
+    // var name, which reached the user's toast verbatim on any deployment
+    // missing the secret -- an internal configuration detail with no reason
+    // to be shown to a person asking a budgeting question.
+    if (!key) throw new Error("The assistant isn't available right now. Try again in a moment.");
 
     const currentUserMessage = data.messages.filter((m) => m.role === "user").at(-1)?.content ?? "";
 
