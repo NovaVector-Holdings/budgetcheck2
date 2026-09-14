@@ -92,7 +92,7 @@ export const lessons: Lesson[] = [
       "Staying well below your credit limit also matters — credit scoring models look at how close you are to being maxed out, and the CFPB suggests keeping your use of credit at no more than 30 percent of your total limit. " +
       "The length of your credit history and how many accounts you have also play a role, and things like your mix of credit types and recent applications for new credit are commonly cited as smaller factors too. " +
       "Two practical points. First, if you find something wrong on your credit report, you have the right to dispute it — contact both the credit reporting company and the company that gave them the information, explain what's wrong, and include documents that support your case. " +
-      "Second, you can check your credit report for free every week from each of the three major credit bureaus at AnnualCreditReport.com — a program the credit reporting agencies created and that federal law has now made permanent. " +
+      "Second, you can check your credit report for free every week from each of the three major credit bureaus at AnnualCreditReport.com. " +
       "Improving a credit score is slow but predictable: pay on time, keep balances low relative to limits, and check your reports for mistakes. " +
       "See the source links below for the full CFPB guide and AnnualCreditReport.com.",
     applyTo: { tab: "weekly", label: "Bring this to this week's check-in" },

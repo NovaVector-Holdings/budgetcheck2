@@ -14,11 +14,12 @@
 // editing (e.g. a CMS) rather than code-reviewed updates.
 //
 // This registry is meant to GOVERN the shipped content, not merely describe
-// it -- see scripts/validate-learn-registry.ts, which fails the build if
-// this file drifts from src/lib/lessons.ts / src/lib/resources.ts (missing
-// entries, duplicate IDs, mismatched org/URL/category, a "retired" item
-// still shipping, a malformed date/status, or a needs_review item with no
-// reviewRequiredReason).
+// it -- see scripts/validate-learn-registry.ts, wired as a `prebuild` hook
+// (so `npm run build` runs it automatically), which fails the build if this
+// file drifts from src/lib/lessons.ts / src/lib/resources.ts (missing
+// entries, duplicate IDs, mismatched org/URL/category/additionalSources, a
+// "retired" item still shipping, a malformed date/status, or a needs_review
+// item with no reviewRequiredReason).
 //
 // This metadata is NOT rendered prominently to users -- it's for internal
 // maintenance, not a user-facing citation format. sourceOrg/sourceUrl below
