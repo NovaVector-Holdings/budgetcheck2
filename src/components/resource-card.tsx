@@ -16,8 +16,8 @@ export function ResourceCard({ r }: { r: Resource }) {
       <h3 className="font-serif text-xl leading-snug text-ink">{r.title}</h3>
       <p className="text-sm text-muted-foreground leading-relaxed">{r.why}</p>
       <div className="mt-auto flex items-center gap-1.5 pt-2 text-xs text-primary">
-        <ShieldCheck className="h-3.5 w-3.5" />
-        <span className="font-medium">{r.source}</span>
+        <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
+        <span className="font-medium">Source: {r.source}</span>
       </div>
     </a>
   );
