@@ -4,19 +4,22 @@ import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 // Five everyday tools stay in reach; the rest live behind "More" so the
-// page doesn't open with eleven choices.
+// page doesn't open with eleven choices. Money Meeting is primary -- it's
+// the recurring-habit REVIEW surface (weekly check-in, monthly review),
+// which belongs ahead of a passive reporting destination. Reports moves to
+// More: real functionality, just not a habit surface, so it doesn't need
+// top-level reach the way Money Meeting does.
 const primaryNav = [
   { to: "/overview", label: "Overview" },
   { to: "/future-expenses", label: "Bills" },
   { to: "/savings", label: "Savings" },
   { to: "/debt", label: "Debt" },
-  { to: "/analytics", label: "Reports" },
+  { to: "/money-meeting", label: "Money meeting" },
 ] as const;
 
 const moreNav = [
+  { to: "/analytics", label: "Reports" },
   { to: "/calendar", label: "Calendar" },
-  { to: "/money-meeting", label: "Money meeting" },
-  
   { to: "/alerts", label: "Reminders" },
   { to: "/archives", label: "Archive" },
   { to: "/settings", label: "Settings" },
