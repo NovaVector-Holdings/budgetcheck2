@@ -97,9 +97,9 @@ Reply with a single JSON object and nothing else. No markdown fence, no text bef
 "answer" IS A TEMPLATE — YOU PICK WHAT TO SAY, BUDGETCHEK WRITES THE FACTS
 You never write a dollar amount, a percentage, a specific date, OR the name of a real bill/debt/goal/account/reserved fund yourself. Write "answer" as connective prose with placeholders standing in for BOTH the fact and the thing it's about — {claim:0}, {claim:1}, {action}, {decision}. BudgetChek resolves each placeholder into a complete, self-identifying phrase (e.g. "Rent's amount ($900.00)") and substitutes it before anyone sees your answer. Two hard rules, no exceptions:
 - NEVER write a literal "$", "%", or specific date directly in "answer" -- always a {claim:N} placeholder instead, even when you are completely sure of the number.
-- NEVER write the name of a real bill, debt, goal, account, or reserved fund directly in "answer" UNLESS that exact same entity is also the subject of one of your claims -- a real entity name floating in your prose that isn't backed by a claim about that entity is rejected as a likely mix-up, even if every number elsewhere is correct. If you want to talk about Rent, put a claim about Rent in "claims" and reference it with {claim:N} -- do not just write the word "Rent".
+- NEVER write the name of a real bill, debt, goal, account, or reserved fund directly in "answer" -- not even when that exact entity is also the subject of one of your claims elsewhere in the same response. A claim about that entity somewhere else doesn't prove it belongs next to THIS sentence, and a real entity name written raw is always rejected. If you want to talk about Rent, put a claim about Rent in "claims" and reference it with {claim:N} -- the rendered phrase (e.g. "Rent's amount ($900.00)") already names it; never also write the word "Rent" yourself.
 
-Example: instead of writing "Rent is $900, due September 20.", write "{claim:0}, due {claim:1}." with two claims about bill:Rent -- the rendered result becomes "Rent's amount ($900.00), due Rent's due date (September 20)." A little more literal than natural speech, and that's intentional: entity identity and figure travel together, authored by BudgetChek, never separable.
+Example: instead of writing "Rent is $900, due September 20.", write "{claim:0}, due {claim:1}." with two claims about bill:Rent -- the rendered result becomes "Rent's amount ($900.00), due Rent's due date (September 20)." A little more literal than natural speech, and that's intentional: entity identity and figure travel together, authored by BudgetChek, never separable. This holds even if you already used a different claim about Rent earlier in the same answer.
 
 CLAIMS — how to reference a real fact or state
 Each entry in "claims": {"kind": "fact"|"derived"|"user_input"|"state", "fieldPath": string (fact/derived, and most state codes), "operation": "add"|"subtract" (derived only), "userOperand": string (derived and user_input, the exact figure the person just typed), "stateCode": string (state only)}.
@@ -115,28 +115,28 @@ fieldPath addressing (fact, derived, and entity-scoped state):
 - If a value you need is in neither place, name it in "missing" (see MISSING below) and do not reference it with a placeholder at all.
 
 ACTIONS — a closed vocabulary, and BudgetChek writes the closing sentence, not you
-When nextActionType is "concrete_action", include "action": {"code": one of the codes below, "targetFieldPath": string, when the code needs one}, AND your "answer" template must contain exactly one {action} placeholder -- BudgetChek generates the actual next-step sentence from the validated code and substitutes it there. You supply context around {action}; you do not write the recommendation yourself. You may only ever use one of these codes — there is no other supported action, and none of them means "skip" or "pay late":
+When nextActionType is "concrete_action", include "action": {"code": one of the codes below, "targetFieldPath": string, when the code needs one}, AND your "answer" template must contain exactly one {action} placeholder, never more than one — a second copy is rejected the same as a missing one — BudgetChek generates the actual next-step sentence from the validated code and substitutes it there. You supply context around {action}; you do not write the recommendation yourself. You may only ever use one of these codes — there is no other supported action, and none of them means "skip" or "pay late":
 - hold_for_due_item: a specific bill due within the current window, or a specific debt's minimum payment WITH a real due date on file that also falls within the window.
 - review_due_date: a specific bill or debt's due date (only when a real due date is on file).
 - add_missing_due_date: a specific bill or debt whose due date is genuinely not on file.
 - pay_required_minimum: a specific debt's minimum payment. Requires a real due date on file within the window too — a minimum with no due date is not "currently due"; use add_missing_due_date or ask instead.
 - review_shortfall_item: a specific bill or debt that is ACTUALLY one of the items the current funding plan identifies as affected by a real shortfall (partially funded, unfunded, or at/after the real cutoff) — not merely any real item while a shortfall exists somewhere else.
-- review_obligation_options: same "actually affected" requirement as review_shortfall_item. Renders as "review this before its due date, and consider contacting the provider about your options" — never means the obligation can go unpaid, and BudgetChek never claims to know what the provider will allow.
+- review_obligation_options: a bill's amount, or (for a debt) its MINIMUM payment — never a debt's total balance; the current-cycle obligation is the minimum, not the balance. Same "actually affected" requirement as review_shortfall_item, PLUS a real due date on file within the current window (same evidence requirement as pay_required_minimum) — BudgetChek will not render "before its due date" without actually having one; if the due date is missing, use add_missing_due_date or ask instead. Renders as "review this before its due date, and consider contacting the provider about your options" — never means the obligation can go unpaid, and BudgetChek never claims to know what the provider will allow.
 - compare_user_priorities: no single target needed — a values tradeoff between more than one real thing.
 - review_reserved_fund: a specific reserved fund.
 - no_action_needed: only when the plan is genuinely complete with no shortfall.
 If what you want to recommend doesn't cleanly match one of these, do not invent a new action — use nextActionType "user_decision" (with a structured decision) or "clarifying_question" instead.
 
 DECISIONS — a values tradeoff is structured too, and BudgetChek writes the choice itself
-When nextActionType is "user_decision", include "decision": {"options": [...]} with AT LEAST TWO DISTINCT options (two copies of the same option is not a choice), AND your "answer" template must contain exactly one {decision} placeholder — BudgetChek generates the neutral framing of the actual choice from the validated options and substitutes it there. A decision like this is only offered when the plan actually supports discretion: it must be complete with no real shortfall. If there's a real shortfall, the path is reviewing the affected obligation (see ACTIONS), never a discretionary decision presented as equivalent. Each option: {"code": one of the codes below, "targetFieldPath": string, when the code needs one} — same closed-vocabulary principle, nothing here for skipping, ignoring, or deferring a real obligation:
+When nextActionType is "user_decision", include "decision": {"options": [...]} with AT LEAST TWO DISTINCT options (two copies of the same option is not a choice), AND your "answer" template must contain exactly one {decision} placeholder, never more than one — BudgetChek generates the neutral framing of the actual choice from the validated options and substitutes it there. A decision like this is only offered when the plan actually supports discretion: it must be complete with no real shortfall. If there's a real shortfall, the path is reviewing the affected obligation (see ACTIONS), never a discretionary decision presented as equivalent. Each option: {"code": one of the codes below, "targetFieldPath": string, when the code needs one} — same closed-vocabulary principle, nothing here for skipping, ignoring, or deferring a real obligation:
 - prioritize_goal / defer_discretionary_goal: a specific real goal.
-- prioritize_extra_debt_payment: a specific real debt's balance.
+- prioritize_extra_debt_payment: a specific real debt's balance, but ONLY a debt with a real, positive APR — a 0% balance gets the required minimum only and is never offered as a discretionary priority choice (standing Money Meeting rule).
 - preserve_additional_buffer: target optional.
 - compare_real_priorities: target optional.
 Example: "emergency fund first, or the higher-rate debt?" (only when the plan is genuinely complete with no shortfall) → decision.options = [{"code":"prioritize_goal","targetFieldPath":"goal:Emergency fund.saved"},{"code":"prioritize_extra_debt_payment","targetFieldPath":"debt:Credit card.balance"}].
 
 MISSING — structured, not free text
-"missing" is an array of {"code": one of missing_due_date, missing_amount, missing_balance, missing_apr, missing_minimum, missing_other, "targetFieldPath": string (when it's about a specific real item; omit when it's genuinely new information not on file at all)}. BudgetChek renders the actual wording shown to the person from this structure — you name WHAT kind of thing is missing and, when applicable, which real item it's missing for; you do not write the sentence yourself.`;
+"missing" is an array of {"code": one of missing_due_date, missing_amount, missing_balance, missing_apr, missing_minimum, missing_other, "targetFieldPath": string (when it's about a specific real item; omit when it's genuinely new information not on file at all)}. BudgetChek renders the actual wording shown to the person from this structure — you name WHAT kind of thing is missing and, when applicable, which real item it's missing for; you do not write the sentence yourself. Only use a targetFieldPath when the real value is genuinely absent (null) on that exact field — BudgetChek checks this against the real data, and a missing item naming a field that actually already has a value is rejected the same as any other false claim, even under missing_other.`;
 
 export const askMoneyMeeting = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -225,11 +225,17 @@ export const askMoneyMeeting = createServerFn({ method: "POST" })
     if (!verdict.grounded) {
       console.error("[askMoneyMeeting] grounding check failed:", verdict.reason);
       return {
-        reply: safeFallback(parsed.missing),
+        // verdict.safeMissing -- never parsed.missing -- is what reaches
+        // the person: the subset of the model's claimed-missing items
+        // that were actually verified absent from real data. A false
+        // missing claim (or one naming something that doesn't resolve)
+        // never reaches safeFallback, even when grounding failed for a
+        // completely unrelated reason.
+        reply: safeFallback(verdict.safeMissing),
         grounded: false,
         groundingReason: verdict.reason ?? null,
         factsUsed: [],
-        missing: parsed.missing,
+        missing: verdict.safeMissing,
         nextActionType: "insufficient_data" as const,
       };
     }
@@ -243,7 +249,7 @@ export const askMoneyMeeting = createServerFn({ method: "POST" })
       grounded: true,
       groundingReason: null,
       factsUsed: verdict.resolvedFacts!,
-      missing: parsed.missing,
+      missing: verdict.safeMissing,
       nextActionType: parsed.nextActionType,
     };
   });

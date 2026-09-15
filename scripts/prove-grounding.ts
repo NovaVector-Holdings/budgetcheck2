@@ -7,13 +7,27 @@
 // validator's OWN logic is sound and repeatable, independent of whatever
 // the model happens to say on a given run.
 //
-// v4 (this round) rewrites the contract again: claims lose their
-// model-authored "label" (BudgetChek now authors entity identity too, not
-// just the value), gain a "state" kind for qualitative facts, "answer"
-// requires {action}/{decision} placeholders for structured next-steps,
-// and "missing" is a closed, structured list instead of free strings.
-// Every property tested in rounds 1-3 is re-verified under this contract
-// (see section headers below); nothing was dropped, only re-expressed.
+// v4 rewrote the contract: claims lose their model-authored "label"
+// (BudgetChek now authors entity identity too, not just the value), gain
+// a "state" kind for qualitative facts, "answer" requires
+// {action}/{decision} placeholders for structured next-steps, and
+// "missing" is a closed, structured list instead of free strings.
+//
+// v5 (this round, a bounded correction pass) closes four residual gaps
+// in that same mechanism -- see the matching comment block at the top of
+// src/lib/grounding.ts for the detail on each. New/changed sections
+// below: the entity scan is now unconditional (a real name is never
+// allowed raw in prose, even if claimed elsewhere -- see the new
+// "cross-claim composition hole" test replacing the old "allowed"
+// positive case); "missing" items are validated against real, current
+// state, not just resolvability (tests D/E/F/G plus a few more);
+// review_obligation_options requires a debt MINIMUM target (never
+// balance) plus a real in-window due date (tests H/I/J/K);
+// prioritize_extra_debt_payment requires a real positive APR (tests
+// L/M); {action}/{decision} placeholders must appear exactly once.
+// Every property tested in rounds 1-4 is re-verified under this
+// contract; nothing was dropped, only re-expressed where the mechanism
+// itself changed.
 //
 // Run with: npx tsx scripts/prove-grounding.ts
 
@@ -59,10 +73,24 @@ function buildSnapshot(
   overrides: {
     extraBillName?: string;
     extraGoalName?: string;
+    /** A real debt with a short (< 4 char) leading word in a multi-word
+     *  name, e.g. "US Bank card" -- for testing that scanForRawEntityNames
+     *  catches the name even when the model drops that short leading
+     *  word or varies internal whitespace. Opt-in so it never changes
+     *  any of the existing, unrelated tests' fixture. */
+    extraDebtName?: string;
     reasonMoved?: string | null;
     shortfall?: number;
     complete?: boolean;
     reservedTapped?: number;
+    /** Round 6: appends extra funding-plan line items, each explicitly
+     *  "partial" -- for testing review_obligation_options' requirement
+     *  that a target be one of the items the plan actually flags as
+     *  shortfall-affected, independent of Rent/Water bill's own status.
+     *  Debt entries use the engine's real "<name> minimum" label
+     *  convention -- a debt's current-cycle funding-plan line item is
+     *  always its minimum payment, never its balance. */
+    extraShortfallItems?: Array<{ kind: "bill" | "debt"; name: string }>;
   } = {},
 ) {
   const shortfall = overrides.shortfall ?? 0;
@@ -101,6 +129,17 @@ function buildSnapshot(
             funded: shortfall > 0 ? 75 : 150,
             status: shortfall > 0 ? "partial" : "funded",
           },
+          ...(overrides.extraShortfallItems ?? []).map((it, i) => ({
+            id: `extra-${i}`,
+            label: it.kind === "bill" ? it.name : `${it.name} minimum`,
+            amount: 0,
+            tier: 9,
+            tierLabel: "Other obligations",
+            dueDate: null,
+            reasonMoved: null,
+            funded: 0,
+            status: "partial",
+          })),
         ],
         cutoffIndex: shortfall > 0 ? 1 : -1,
         totalRequested: 1200,
@@ -136,6 +175,9 @@ function buildSnapshot(
       { name: "Medical bill", balance: 640, apr: 0, minimum: 50, due: null },
       { name: "Car loan", balance: 4000, apr: 6.5, minimum: 220, due: "2026-09-25" },
       { name: "Phone plan", balance: 200, apr: 0, minimum: 40, due: "2026-09-18" },
+      ...(overrides.extraDebtName
+        ? [{ name: overrides.extraDebtName, balance: 500, apr: 19.99, minimum: 20, due: null }]
+        : []),
     ],
     goals: [
       { name: "Emergency fund", target: 1000, saved: 250 },
@@ -338,10 +380,30 @@ const CASES: Case[] = [
     expectGrounded: true,
   },
   {
-    name: "entity referenced by its own claim IS allowed to appear raw in prose",
+    // Round 6: the composition hole the "unclaimed-only" scan left open.
+    // Rent IS claimed somewhere in this response (claim:0), just not for
+    // the fact it's written raw next to -- claim:1 actually resolves
+    // Water bill. The old scan let "Rent" through because it was claimed
+    // SOMEWHERE; the new scan bans it unconditionally, closing this.
+    name: "round 6: raw entity name is REJECTED even when that entity IS claimed elsewhere in the response -> FAIL",
+    userMessage: "What's my rent, and what's the water bill?",
+    response: {
+      answer: "Rent is {claim:1}. {claim:0} is separate.",
+      claims: [
+        { kind: "fact", fieldPath: "bill:Rent.amount" },
+        { kind: "fact", fieldPath: "bill:Water bill.amount" },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: 'names "Rent" directly in prose',
+  },
+  {
+    name: "no raw entity name anywhere, only placeholders -- PASS (this is what the model must do instead)",
     userMessage: "What's my rent?",
     response: {
-      answer: "Rent is {claim:0}, due {claim:1}.",
+      answer: "{claim:0}, due {claim:1}.",
       claims: [
         { kind: "fact", fieldPath: "bill:Rent.amount" },
         { kind: "fact", fieldPath: "bill:Rent.due" },
@@ -389,6 +451,37 @@ const CASES: Case[] = [
       action: { code: "pay_required_minimum", targetFieldPath: "debt:Phone plan.minimum" },
     },
     expectGrounded: true,
+  },
+  {
+    name: "round 6: concrete_action with a DUPLICATE {action} placeholder -> FAIL",
+    userMessage: "What should I do about my phone plan?",
+    response: {
+      answer: "Here's the next step: {action} And just to repeat, again: {action}",
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "pay_required_minimum", targetFieldPath: "debt:Phone plan.minimum" },
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "exactly one {action} placeholder",
+  },
+  {
+    name: "round 6: user_decision with a DUPLICATE {decision} placeholder -> FAIL",
+    userMessage: "Extra money: emergency fund or extra Visa payment?",
+    response: {
+      answer: "{decision} And to say it again: {decision}",
+      claims: [],
+      missing: [],
+      nextActionType: "user_decision",
+      decision: {
+        options: [
+          { code: "prioritize_goal", targetFieldPath: "goal:Emergency fund.saved" },
+          { code: "prioritize_extra_debt_payment", targetFieldPath: "debt:Visa card.balance" },
+        ],
+      },
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "exactly one {decision} placeholder",
   },
 
   // ===================================================================
@@ -449,6 +542,83 @@ const CASES: Case[] = [
   },
 
   // ===================================================================
+  // Round 6, section 3: review_obligation_options must target a debt's
+  // MINIMUM (never its balance) and must not invent a due-date boundary
+  // it doesn't possess. Required tests H, I, J, K.
+  // ===================================================================
+  {
+    name: "H: review_obligation_options on a shortfall-affected debt minimum with due=null -> FAIL",
+    userMessage: "What are my options for the Visa card?",
+    response: {
+      answer: "{action}",
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "review_obligation_options", targetFieldPath: "debt:Visa card.minimum" },
+    },
+    snapshotJson: buildSnapshot({
+      shortfall: 35,
+      extraShortfallItems: [{ kind: "debt", name: "Visa card" }],
+    }),
+    expectGrounded: false,
+    expectReasonIncludes: "does not guess timing",
+  },
+  {
+    name: "I: review_obligation_options on a shortfall-affected debt minimum with a real in-window due date -> PASS",
+    userMessage: "What are my options for the phone plan?",
+    response: {
+      answer: "{action}",
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "review_obligation_options", targetFieldPath: "debt:Phone plan.minimum" },
+    },
+    snapshotJson: buildSnapshot({
+      shortfall: 40,
+      extraShortfallItems: [{ kind: "debt", name: "Phone plan" }],
+    }),
+    expectGrounded: true,
+  },
+  {
+    name: "J: review_obligation_options targeting a debt's BALANCE (not minimum) for a current-cycle shortfall -> FAIL",
+    userMessage: "What are my options for the Visa card?",
+    response: {
+      answer: "{action}",
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "review_obligation_options", targetFieldPath: "debt:Visa card.balance" },
+    },
+    snapshotJson: buildSnapshot({
+      shortfall: 35,
+      extraShortfallItems: [{ kind: "debt", name: "Visa card" }],
+    }),
+    expectGrounded: false,
+    expectReasonIncludes: "never a debt's total balance",
+  },
+  {
+    // The other half of K -- "add_missing_due_date is the right path
+    // instead" -- is already proven by the existing "add_missing_due_date
+    // also works for a BILL with a genuinely missing due date -> PASS"
+    // case above, targeting this exact bill:Subscription.due.
+    name: "K: review_obligation_options on a shortfall-affected BILL with a genuinely missing due date -> FAIL",
+    userMessage: "What are my options for the subscription?",
+    response: {
+      answer: "{action}",
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "review_obligation_options", targetFieldPath: "bill:Subscription.amount" },
+    },
+    snapshotJson: buildSnapshot({
+      shortfall: 15,
+      extraShortfallItems: [{ kind: "bill", name: "Subscription" }],
+    }),
+    expectGrounded: false,
+    expectReasonIncludes: "does not guess timing",
+  },
+
+  // ===================================================================
   // Section 4: discretionary decisions require a responsible plan state,
   // and options must be distinct. Required tests D, E, F.
   // ===================================================================
@@ -505,6 +675,46 @@ const CASES: Case[] = [
     },
     expectGrounded: false,
     expectReasonIncludes: "must be distinct",
+  },
+
+  // ===================================================================
+  // Round 6: the standing "0% balance gets the minimum only" rule must
+  // hold in the structured decision vocabulary too. Required tests L, M.
+  // ===================================================================
+  {
+    name: "L: decision option prioritize_extra_debt_payment on a 0% APR debt (Store card) -> FAIL",
+    userMessage: "Extra money: buffer, or extra principal on the store card?",
+    response: {
+      answer: "{decision}",
+      claims: [],
+      missing: [],
+      nextActionType: "user_decision",
+      decision: {
+        options: [
+          { code: "preserve_additional_buffer" },
+          { code: "prioritize_extra_debt_payment", targetFieldPath: "debt:Store card.balance" },
+        ],
+      },
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "0% balance gets the required minimum only",
+  },
+  {
+    name: "M: decision option prioritize_extra_debt_payment on a real positive-APR debt (Visa), plan complete, no shortfall -> PASS",
+    userMessage: "Extra money: emergency fund, or extra principal on the Visa card?",
+    response: {
+      answer: "{decision}",
+      claims: [],
+      missing: [],
+      nextActionType: "user_decision",
+      decision: {
+        options: [
+          { code: "prioritize_goal", targetFieldPath: "goal:Emergency fund.saved" },
+          { code: "prioritize_extra_debt_payment", targetFieldPath: "debt:Visa card.balance" },
+        ],
+      },
+    },
+    expectGrounded: true,
   },
 
   // ===================================================================
@@ -644,15 +854,23 @@ const CASES: Case[] = [
   // depth, re-verified here for a model that doesn't use the structured
   // "state" claim kind at all.
   {
-    // "Rent" is claimed (for its amount) so the entity-authority scan
-    // passes -- isolating checkPaidStateClaims to prove it independently
-    // catches a false qualitative assertion about the SAME entity that
-    // no claim in this response actually backs.
-    name: "free-prose 'Rent is already paid' (no state claim for THAT fact) when really false -> FAIL",
-    userMessage: "Is rent paid, and how much is it?",
+    // Round 6: "Rent" must never be written raw, even here -- so this
+    // now reaches the rendered text only via claim:0's authoritative
+    // phrase substitution ("Rent's due date is on file (September 20)"),
+    // never as a raw template literal. (A "fact" claim on Rent's AMOUNT
+    // doesn't work as the vehicle here -- checkPaidStateClaims's regex
+    // can't cross the decimal point inside the rendered dollar figure
+    // "$900.00", a pre-existing fragility of that round-4 scan, not
+    // something this round touches -- a "state" claim renders with no
+    // embedded period and isolates the property cleanly.) This still
+    // proves checkPaidStateClaims independently catches a false
+    // qualitative assertion about the SAME entity that no claim in this
+    // response actually backs.
+    name: "free-prose 'it is already paid' about an entity named only via claim substitution, when really false -> FAIL",
+    userMessage: "Is rent paid? Also, does it have a due date on file?",
     response: {
-      answer: "Rent is already paid. It's {claim:0}.",
-      claims: [{ kind: "fact", fieldPath: "bill:Rent.amount" }],
+      answer: "{claim:0} -- it is already paid.",
+      claims: [{ kind: "state", stateCode: "due_present", fieldPath: "bill:Rent.due" }],
       missing: [],
       nextActionType: "lookup_value",
     },
@@ -889,6 +1107,110 @@ const CASES: Case[] = [
   },
 
   // ===================================================================
+  // Round 6, section 2: a structured `missing` item must prove the value
+  // is ACTUALLY missing, not just that its targetFieldPath resolves.
+  // Required tests D, E, F (+ G, standalone below).
+  // ===================================================================
+  {
+    name: "D: missing_due_date claims Rent's due date is missing, but it IS on file -> FAIL",
+    userMessage: "When is rent due?",
+    response: {
+      answer: "I don't have that on file yet.",
+      claims: [],
+      missing: [{ code: "missing_due_date", targetFieldPath: "bill:Rent.due" }],
+      nextActionType: "insufficient_data",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "already on file",
+  },
+  {
+    name: "E: missing_due_date on the Visa card, whose due date genuinely IS null -> PASS",
+    userMessage: "When is the Visa card due?",
+    response: {
+      answer: "I don't have that on file yet.",
+      claims: [],
+      missing: [{ code: "missing_due_date", targetFieldPath: "debt:Visa card.due" }],
+      nextActionType: "insufficient_data",
+    },
+    expectGrounded: true,
+  },
+  {
+    name: "F: missing_apr claims the Visa card's APR is missing, but it IS on file -> FAIL",
+    userMessage: "What's the Visa APR?",
+    response: {
+      answer: "I don't have that on file yet.",
+      claims: [],
+      missing: [{ code: "missing_apr", targetFieldPath: "debt:Visa card.apr" }],
+      nextActionType: "insufficient_data",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "already on file",
+  },
+  {
+    name: "missing_amount claims Rent's amount is missing, but it IS on file -> FAIL",
+    userMessage: "How much is rent?",
+    response: {
+      answer: "I don't have that on file yet.",
+      claims: [],
+      missing: [{ code: "missing_amount", targetFieldPath: "bill:Rent.amount" }],
+      nextActionType: "insufficient_data",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "already on file",
+  },
+  {
+    name: "missing_balance claims the Visa card's balance is missing, but it IS on file -> FAIL",
+    userMessage: "What's my Visa balance?",
+    response: {
+      answer: "I don't have that on file yet.",
+      claims: [],
+      missing: [{ code: "missing_balance", targetFieldPath: "debt:Visa card.balance" }],
+      nextActionType: "insufficient_data",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "already on file",
+  },
+  {
+    name: "missing_minimum claims the Visa card's minimum is missing, but it IS on file -> FAIL",
+    userMessage: "What's my Visa minimum?",
+    response: {
+      answer: "I don't have that on file yet.",
+      claims: [],
+      missing: [{ code: "missing_minimum", targetFieldPath: "debt:Visa card.minimum" }],
+      nextActionType: "insufficient_data",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "already on file",
+  },
+  {
+    name: "missing_apr targetFieldPath pointed at a non-APR field (shape mismatch) -> FAIL",
+    userMessage: "What's the Visa APR?",
+    response: {
+      answer: "I don't have that on file yet.",
+      claims: [],
+      missing: [{ code: "missing_apr", targetFieldPath: "debt:Visa card.minimum" }],
+      nextActionType: "insufficient_data",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "not a real field of the kind",
+  },
+  {
+    // Closes the generic-code loophole: missing_other has no fixed
+    // shape, but it still can't be used to smuggle a false "missing"
+    // claim about a real, populated field past the code-specific checks.
+    name: "missing_other with a targetFieldPath pointing at a real, populated field -> FAIL",
+    userMessage: "How much is rent?",
+    response: {
+      answer: "I don't have that on file yet.",
+      claims: [],
+      missing: [{ code: "missing_other", targetFieldPath: "bill:Rent.amount" }],
+      nextActionType: "insufficient_data",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "already on file",
+  },
+
+  // ===================================================================
   // Responsible-obligation guardrail regardless of label (round 4,
   // re-verified) -- concrete_action / user_decision / free prose.
   // ===================================================================
@@ -911,6 +1233,10 @@ const CASES: Case[] = [
     expectReasonIncludes: "does not resolve",
   },
   {
+    // Round 6: missing_amount now REQUIRES a targetFieldPath (only
+    // missing_other may be genuinely generic) -- and a brand-new item
+    // with no real entity on file at all is exactly what missing_other
+    // is for, not missing_amount naming nothing.
     name: "required item's amount is genuinely unknown -- assistant asks instead of guessing -> PASS",
     userMessage:
       "I have a new copay bill coming but I'm not sure how much it'll be -- what do I do?",
@@ -918,10 +1244,55 @@ const CASES: Case[] = [
       answer:
         "I don't have an amount for that yet -- once you enter it, I can fold it into the plan.",
       claims: [],
-      missing: [{ code: "missing_amount" }],
+      missing: [{ code: "missing_other" }],
       nextActionType: "clarifying_question",
     },
     expectGrounded: true,
+  },
+  {
+    name: "round 6: missing_amount with NO targetFieldPath is no longer a free pass -> FAIL",
+    userMessage: "How much is rent?",
+    response: {
+      answer: "I don't have that on file yet.",
+      claims: [],
+      missing: [{ code: "missing_amount" }],
+      nextActionType: "insufficient_data",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "requires a targetFieldPath",
+  },
+
+  // ===================================================================
+  // Round 6 (adversarial self-verification): entityNameCandidates must
+  // catch a real multi-word entity name even when a short leading word
+  // is dropped, or internal whitespace is varied -- not just the exact
+  // full literal phrase or its first word.
+  // ===================================================================
+  {
+    name: "round 6: real entity name with a short leading word, written WITHOUT that word ('Bank card' for 'US Bank card') -> FAIL",
+    userMessage: "What's the deal with my other cards?",
+    response: {
+      answer: "Bank card charges a lot.",
+      claims: [],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    snapshotJson: buildSnapshot({ extraDebtName: "US Bank card" }),
+    expectGrounded: false,
+    expectReasonIncludes: 'names "US Bank card"',
+  },
+  {
+    name: "round 6: real entity name written with irregular internal whitespace -> FAIL",
+    userMessage: "What's the deal with my other cards?",
+    response: {
+      answer: "US  Bank  card charges a lot.",
+      claims: [],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    snapshotJson: buildSnapshot({ extraDebtName: "US Bank card" }),
+    expectGrounded: false,
+    expectReasonIncludes: 'names "US Bank card"',
   },
 ];
 
@@ -1102,23 +1473,53 @@ function record(name: string, ok: boolean, detail?: string) {
 //     because `missing` no longer carries free text at all. ---
 {
   const unsafeAttempt = JSON.stringify({
-    answer: "Skip rent this month.", // fails grounding (guardrail)
+    answer: "Skip rent this month.", // fails grounding (guardrail / entity ban)
     claims: [],
     missing: [{ code: "missing_other" }], // the only "content" missing can carry is a closed code
     nextActionType: "insufficient_data",
   });
   const parsed = parseContract(unsafeAttempt);
-  const ok =
-    parsed !== null &&
-    checkGrounding(parsed, { snapshotJson: SNAPSHOT, currentUserMessage: "x", injectedSpans: [] })
-      .grounded === false;
-  const fallbackText = parsed ? safeFallback(parsed.missing) : safeFallback([]);
+  const verdict = parsed
+    ? checkGrounding(parsed, { snapshotJson: SNAPSHOT, currentUserMessage: "x", injectedSpans: [] })
+    : null;
+  const ok = parsed !== null && verdict?.grounded === false;
+  const fallbackText = safeFallback(verdict?.safeMissing ?? []);
   const noLeak =
     !fallbackText.toLowerCase().includes("skip") && !fallbackText.toLowerCase().includes("rent");
   record(
     "an ungrounded response's content never reaches the safe fallback -- missing is structured, not free text",
     ok && noLeak,
     `fallback=${JSON.stringify(fallbackText)}`,
+  );
+}
+{
+  // Round 6, required test G: a false missing item never leaks into the
+  // safe fallback, even when grounding fails for a COMPLETELY UNRELATED
+  // reason (here: a raw dollar literal, nothing to do with `missing` at
+  // all). safeMissing is computed unconditionally up front, before any
+  // other defense runs, specifically so this holds regardless of which
+  // check actually trips.
+  const raw = JSON.stringify({
+    answer: "You have $10,000.00 available.", // fails on an unrelated defense
+    claims: [],
+    missing: [{ code: "missing_due_date", targetFieldPath: "bill:Rent.due" }], // FALSE: on file
+    nextActionType: "insufficient_data",
+  });
+  const parsed = parseContract(raw)!;
+  const verdict = checkGrounding(parsed, {
+    snapshotJson: SNAPSHOT,
+    currentUserMessage: "x",
+    injectedSpans: [],
+  });
+  const fallbackText = safeFallback(verdict.safeMissing);
+  const ok =
+    verdict.grounded === false &&
+    !fallbackText.toLowerCase().includes("due date") &&
+    fallbackText === safeFallback([]);
+  record(
+    "G: a false missing item (claims Rent's on-file due date is missing) never reaches the safe fallback, even when grounding fails for an unrelated reason",
+    ok,
+    `reason=${verdict.reason} safeMissing=${JSON.stringify(verdict.safeMissing)} fallback=${JSON.stringify(fallbackText)}`,
   );
 }
 {
