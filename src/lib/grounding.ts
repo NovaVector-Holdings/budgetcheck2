@@ -172,6 +172,62 @@ import { z } from "zod";
 // SAME clause of the message, not just independently somewhere in it --
 // the actual "scenario relationship" proof, not two unlinked existence
 // checks.
+//
+// v8 (this round) is a consolidated closure pass across the whole
+// chain, not another single-hole fix -- see the CEO's own "PR #10
+// CONSOLIDATED TRUST CLOSURE" directive for the full rationale. All
+// prior architecture (answerParts, claims, state, missing, actions,
+// decisions, the responsible-obligation guardrail, the round-7/8
+// user-supplied-number checks) is LOCKED and unchanged; this round adds
+// on top of it rather than reworking it:
+//  - SCENARIO SEMANTICS: a "derived" claim's operation (add/subtract)
+//    used to be whatever the model put in the claim, checked only for
+//    money-type and target-presence, never for whether it actually
+//    matched what the person's own words describe. parseScenarioIntents
+//    is a small, deliberately narrow, deterministic grammar over
+//    supported phrasings ("pay $X toward <debt>", "save $X toward
+//    <goal>", etc.) that independently derives the ONE real scenario
+//    (target, operation, amount) the message expresses; a claim must
+//    match it exactly, or it fails closed. Explicit negation ("don't
+//    pay...") is recognized and excluded. Multiple money values in one
+//    message bind only to their own specific supported phrase, never to
+//    "any number in the same sentence". A scenario is also rejected
+//    when it would drive a debt balance or goal saved-amount below
+//    zero -- see validateScenarioResult.
+//  - DEBT-TIMING SOURCE OF TRUTH: decision-engine.ts's buildFundingPlan
+//    used to include every debt minimum in the ranked funding plan
+//    regardless of due date -- an upstream defect, not just an
+//    assistant wording one, since it made funding.shortfall itself
+//    unreliable. Fixed there (see that file's own header note); this
+//    file's resolveStateClaim/renderActionSentence now surface an
+//    honest caveat whenever FundingPlan.debtsWithUnknownTiming is
+//    non-empty, so a "no shortfall"/"no action needed" claim never
+//    implies debt timing was evaluated when it wasn't. A new ActionCode,
+//    debt_timing_unavailable, replaces add_missing_due_date for debts
+//    specifically (which is now bill-only) -- there is no UI field to
+//    "add" a debt due date to today, so recommending that would itself
+//    be dishonest.
+//  - ACTION/PLAN ALIGNMENT: hold_for_due_item and pay_required_minimum
+//    now also require the target's OWN funding-plan line item to
+//    actually be "funded" (isFundingItemFunded) -- a structurally valid,
+//    in-window obligation that the ranked plan hasn't actually been
+//    able to pay for yet must route to review_shortfall_item/
+//    review_obligation_options instead, never a bare "pay/hold this".
+//    Since the engine allocates money strictly in rank order, this same
+//    check also structurally prevents ever recommending a lower-
+//    priority obligation while a higher-priority one is uncovered --
+//    it's the same underlying fix, not a second mechanism. A bill
+//    already marked paid can no longer be targeted by
+//    hold_for_due_item/review_shortfall_item/review_obligation_options
+//    at all.
+//  - DISCRETIONARY ROOM: validateDecision's gate required the plan
+//    complete with no shortfall, but that alone doesn't prove any
+//    money is actually free to allocate -- available could exactly
+//    equal totalRequested, with zero left over. Now also requires
+//    funding.available - funding.totalRequested > 0.
+//  - no_action_needed's rendered sentence no longer reads as "nothing
+//    to pay" -- it means "no plan change is needed", which is a
+//    materially different claim when real scheduled items still exist.
 
 export type FactType = "money" | "percent" | "date" | "count" | "text" | "boolean";
 
@@ -246,7 +302,8 @@ export type ActionCode =
   | "review_obligation_options"
   | "compare_user_priorities"
   | "review_reserved_fund"
-  | "no_action_needed";
+  | "no_action_needed"
+  | "debt_timing_unavailable";
 
 export interface StructuredAction {
   code: ActionCode;
@@ -503,7 +560,13 @@ function getByDottedPath(root: unknown, dotted: string): unknown {
 /** Resolves a fieldPath string against the REAL parsed payload, returning
  *  its declared type/flags and its actual current value (which may
  *  legitimately be null) -- or null if the path doesn't address anything
- *  real at all. */
+ *  real at all, OR if the name is genuinely ambiguous (round-9
+ *  adversarial review: two real entities sharing a display name let a
+ *  first-match `.find()` silently resolve a DIFFERENT entity than the
+ *  one a funding-plan lookup elsewhere in this file independently
+ *  matched -- fixed by failing closed on more than one match, the same
+ *  "never guess which one" rule isNameUniqueInKind already applies on
+ *  the scenario-parser path). */
 function resolveFieldPath(fieldPath: string, payload: Record<string, unknown>): Resolved | null {
   const entityMatch = fieldPath.match(ENTITY_FIELD_PATH_RE);
   if (entityMatch) {
@@ -513,10 +576,11 @@ function resolveFieldPath(fieldPath: string, payload: Record<string, unknown>): 
     const arr = payload[ENTITY_ARRAY_KEY[kind]];
     if (!Array.isArray(arr)) return null;
     const nameField = ENTITY_NAME_FIELD[kind];
-    const entity = arr.find(
+    const matches = arr.filter(
       (e) => e && typeof e === "object" && (e as Record<string, unknown>)[nameField] === name,
     );
-    if (!entity) return null;
+    if (matches.length !== 1) return null;
+    const entity = matches[0];
     return { meta, value: (entity as Record<string, unknown>)[field] };
   }
 
@@ -572,6 +636,54 @@ function extractMoneyOperandsFromText(text: string): number[] {
   return out;
 }
 
+/** Every real, addressable entity name on file, across every kind
+ *  (bill/debt/goal/account/reserved) -- round-9 adversarial review
+ *  finding: a shorter real name that's a strict PREFIX of a different,
+ *  longer real name (a debt named "Visa" alongside a separate debt
+ *  named "Visa card"; a goal named "Emergency" alongside "Emergency
+ *  fund") could still \b...\b-match inside a message that only ever
+ *  named the LONGER one -- \b fires at a word/space transition just as
+ *  readily as at a genuine name boundary. This list is how a match on
+ *  the shorter name gets recognized as shadowed rather than accepted. */
+function allRealEntityNames(payload: Record<string, unknown>): string[] {
+  const names: string[] = [];
+  for (const kind of Object.keys(ENTITY_ARRAY_KEY)) {
+    const arr = payload[ENTITY_ARRAY_KEY[kind]];
+    if (!Array.isArray(arr)) continue;
+    const nameField = ENTITY_NAME_FIELD[kind];
+    for (const e of arr) {
+      if (!e || typeof e !== "object") continue;
+      const n = (e as Record<string, unknown>)[nameField];
+      if (typeof n === "string") names.push(n);
+    }
+  }
+  return names;
+}
+
+/** True if the match for `name` at `matchIndex` in `text` is actually a
+ *  strict PREFIX occurrence of a DIFFERENT, longer real entity name --
+ *  i.e. the person named the longer entity, not this shorter one. See
+ *  allRealEntityNames's doc comment for why a plain \b...\b match can't
+ *  tell the difference on its own. */
+function isShadowedByLongerEntityName(
+  name: string,
+  text: string,
+  matchIndex: number,
+  allNames: string[],
+): boolean {
+  const words = name.split(/\s+/).filter(Boolean);
+  return allNames.some((other) => {
+    if (other === name) return false;
+    const otherWords = other.split(/\s+/).filter(Boolean);
+    if (otherWords.length <= words.length) return false;
+    const isPrefix = words.every((w, i) => otherWords[i]?.toLowerCase() === w.toLowerCase());
+    if (!isPrefix) return false;
+    const otherFull = otherWords.map(escapeRegex).join("\\s+");
+    const otherMatch = new RegExp(`\\b${otherFull}\\b`, "i").exec(text);
+    return !!otherMatch && otherMatch.index === matchIndex;
+  });
+}
+
 /** Is this real entity actually referenced in the person's CURRENT
  *  message -- the FULL name only (whitespace-tolerant). Deliberately no
  *  "first distinctive word alone" shortcut here (unlike the old raw-
@@ -586,11 +698,19 @@ function extractMoneyOperandsFromText(text: string): number[] {
  *  A derived claim's target must pass this on the full name; a shortened
  *  reference is a genuine ambiguity BudgetChek asks about rather than
  *  guesses. Never silently resolved from an earlier turn either -- only
- *  the current message counts. */
-function entityReferencedInMessage(name: string, message: string): boolean {
+ *  the current message counts. `allNames` (every real entity name on
+ *  file) is used to reject a match that's actually shadowed by a
+ *  different, longer real name -- see isShadowedByLongerEntityName. */
+function entityReferencedInMessage(name: string, message: string, allNames: string[]): boolean {
   const words = name.split(/\s+/).filter(Boolean);
   const full = words.map(escapeRegex).join("\\s+");
-  return new RegExp(`\\b${full}\\b`, "i").test(message);
+  const re = new RegExp(`\\b${full}\\b`, "gi");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(message))) {
+    if (!isShadowedByLongerEntityName(name, message, m.index, allNames)) return true;
+    if (re.lastIndex === m.index) re.lastIndex++;
+  }
+  return false;
 }
 
 /** Splits the CURRENT message into sentence-like clauses (on ./!/? or a
@@ -621,13 +741,265 @@ function scenarioClauseBindsOperandAndTarget(
   message: string,
   entityName: string,
   operandNum: number,
+  payload: Record<string, unknown>,
 ): boolean {
+  const allNames = allRealEntityNames(payload);
   for (const clause of sentencesOf(message)) {
-    const hasTarget = entityReferencedInMessage(entityName, clause);
+    const hasTarget = entityReferencedInMessage(entityName, clause, allNames);
     const hasMoney = extractMoneyOperandsFromText(clause).some((n) => moneyClose(n, operandNum));
     if (hasTarget && hasMoney) return true;
   }
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Scenario semantics -- BudgetChek owns the arithmetic intent. A small,
+// deliberately narrow, deterministic grammar over specific supported
+// phrasings -- NOT general NLP -- independently derives the ONE real
+// scenario (target, operation, amount) the person's own words express.
+// A "derived" claim's operation/target/amount must match this exactly;
+// the model may never pick a different one. Unknown wording matches
+// nothing, which resolveClaim treats as fail closed / ask for
+// clarification, the same as any other unresolvable claim.
+// ---------------------------------------------------------------------------
+
+export interface ScenarioIntent {
+  targetKind: "debt" | "goal";
+  targetName: string;
+  targetFieldPath: string;
+  operation: "add" | "subtract";
+  operandMoney: number;
+}
+
+/** A small set of intensifier words the supported phrasings tolerate
+ *  between the verb and the money token ("put AN EXTRA $300 toward"),
+ *  without turning the grammar into general NLP -- still exactly one
+ *  optional, closed fragment, never arbitrary text. */
+const SCENARIO_FILLER = `(?:an?\\s+(?:extra|additional)\\s+|another\\s+|some\\s+)?`;
+
+/** Regex SOURCE (not a compiled RegExp) for one UNSIGNED money token:
+ *  dollar-signed ("$300", "$1,234.50") or "dollars"/"bucks"-suffixed
+ *  ("300 dollars", "300bucks"). Used only inside the scenario patterns
+ *  below -- direction comes from which verb matched (pay/put/send vs.
+ *  charge/borrow, save/add/deposit vs. take/withdraw/use), never from a
+ *  sign on the number itself; resolveClaim separately rejects any
+ *  non-positive operand outright (see the "no negative operand"
+ *  requirement). */
+const MONEY_TOKEN = String.raw`\$\s?\d[\d,]*(?:\.\d{1,2})?|\d[\d,]*(?:\.\d{1,2})?\s?(?:dollars?|bucks)\b`;
+
+function moneyTokenToNumber(raw: string): number | null {
+  const cleaned = raw.replace(/[$,\s]/g, "").replace(/dollars?|bucks/gi, "");
+  if (cleaned === "") return null;
+  const n = Number.parseFloat(cleaned);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+interface ScenarioPattern {
+  operation: "add" | "subtract";
+  build: (nameRe: string) => RegExp;
+}
+
+const DEBT_SCENARIO_PATTERNS: ScenarioPattern[] = [
+  {
+    operation: "subtract",
+    build: (n) =>
+      new RegExp(
+        `\\bpay(?:ing)?\\s+(?:down\\s+)?${SCENARIO_FILLER}(${MONEY_TOKEN})\\s+(?:toward|on|to|against)\\s+(?:the\\s+)?${n}\\b`,
+        "i",
+      ),
+  },
+  {
+    operation: "subtract",
+    build: (n) =>
+      new RegExp(
+        `\\bput\\s+${SCENARIO_FILLER}(${MONEY_TOKEN})\\s+toward\\s+(?:the\\s+)?${n}\\b`,
+        "i",
+      ),
+  },
+  {
+    operation: "subtract",
+    build: (n) =>
+      new RegExp(`\\bsend\\s+${SCENARIO_FILLER}(${MONEY_TOKEN})\\s+to\\s+(?:the\\s+)?${n}\\b`, "i"),
+  },
+  {
+    operation: "subtract",
+    build: (n) =>
+      new RegExp(
+        `\\b(?:make\\s+)?(?:an\\s+)?extra\\s+(${MONEY_TOKEN})\\s+payment\\s+on\\s+(?:the\\s+)?${n}\\b`,
+        "i",
+      ),
+  },
+  {
+    operation: "subtract",
+    build: (n) =>
+      new RegExp(`\\bpay(?:ing)?\\s+down\\s+(?:the\\s+)?${n}\\s+by\\s+(${MONEY_TOKEN})\\b`, "i"),
+  },
+  {
+    operation: "add",
+    build: (n) =>
+      new RegExp(`\\bcharge\\s+(?:another\\s+)?(${MONEY_TOKEN})\\s+to\\s+(?:the\\s+)?${n}\\b`, "i"),
+  },
+  {
+    operation: "add",
+    build: (n) =>
+      new RegExp(
+        `\\badd\\s+${SCENARIO_FILLER}(${MONEY_TOKEN})\\s+to\\s+(?:the\\s+)?balance\\s+on\\s+(?:the\\s+)?${n}\\b`,
+        "i",
+      ),
+  },
+  {
+    operation: "add",
+    build: (n) =>
+      new RegExp(`\\bborrow\\s+(?:another\\s+)?(${MONEY_TOKEN})\\s+on\\s+(?:the\\s+)?${n}\\b`, "i"),
+  },
+];
+
+const GOAL_SCENARIO_PATTERNS: ScenarioPattern[] = [
+  {
+    operation: "add",
+    build: (n) =>
+      new RegExp(
+        `\\bsave\\s+${SCENARIO_FILLER}(${MONEY_TOKEN})\\s+toward\\s+(?:the\\s+)?${n}\\b`,
+        "i",
+      ),
+  },
+  {
+    operation: "add",
+    build: (n) =>
+      new RegExp(`\\badd\\s+${SCENARIO_FILLER}(${MONEY_TOKEN})\\s+to\\s+(?:the\\s+)?${n}\\b`, "i"),
+  },
+  {
+    operation: "add",
+    build: (n) =>
+      new RegExp(
+        `\\bcontribute\\s+${SCENARIO_FILLER}(${MONEY_TOKEN})\\s+to\\s+(?:the\\s+)?${n}\\b`,
+        "i",
+      ),
+  },
+  {
+    operation: "add",
+    build: (n) =>
+      new RegExp(
+        `\\bdeposit\\s+${SCENARIO_FILLER}(${MONEY_TOKEN})\\s+into\\s+(?:the\\s+)?${n}\\b`,
+        "i",
+      ),
+  },
+  {
+    operation: "subtract",
+    build: (n) => new RegExp(`\\btake\\s+(${MONEY_TOKEN})\\s+from\\s+(?:the\\s+)?${n}\\b`, "i"),
+  },
+  {
+    operation: "subtract",
+    build: (n) => new RegExp(`\\bwithdraw\\s+(${MONEY_TOKEN})\\s+from\\s+(?:the\\s+)?${n}\\b`, "i"),
+  },
+  {
+    operation: "subtract",
+    build: (n) => new RegExp(`\\buse\\s+(${MONEY_TOKEN})\\s+from\\s+(?:the\\s+)?${n}\\b`, "i"),
+  },
+];
+
+/** Explicit negation must never become a positive scenario. "Don't pay
+ *  $300 toward Visa card" and "I can't put $300 toward Visa card" must
+ *  NOT be read as the person proposing that payment. Checked against
+ *  the portion of the clause BEFORE the matched verb phrase only -- a
+ *  negation ANYWHERE in the same clause blocks the match -- round-9
+ *  adversarial review found the original "before the match only" check
+ *  let an explicit trailing refusal in the same breath ("Pay $300
+ *  toward Visa card, don't do it") still render as a real proposed
+ *  hypothetical, since nothing after the matched phrase was ever
+ *  inspected. Checking the whole clause can over-reject a rare
+ *  legitimate case (a negation word used for an unrelated reason later
+ *  in the same clause, e.g. "...so I don't fall behind"), but
+ *  over-rejecting here only means BudgetChek asks the person to restate
+ *  -- never that a real number renders bound to the wrong intent, which
+ *  is the same safe-direction tradeoff this file makes everywhere else.
+ *  The alternation was also broadened with several common negation
+ *  forms that were previously missing entirely (wouldn't, ain't,
+ *  refuse to, no way, absolutely not, and a bare "not"). */
+const SCENARIO_NEGATION_RE =
+  /\b(don'?t|do\s+not|won'?t|will\s+not|can'?t|cannot|could\s?n'?t|could\s+not|should\s?n'?t|should\s+not|would\s?n'?t|would\s+not|ain'?t|refuse[sd]?\s+to|no\s+way|absolutely\s+not|never|not\s+going\s+to|not)\b/i;
+
+function isClauseNegated(clause: string): boolean {
+  return SCENARIO_NEGATION_RE.test(clause);
+}
+
+/** Independently derives every scenario the person's CURRENT message
+ *  expresses, by checking every real debt/goal against every pattern
+ *  for its OWN kind (a debt is only ever checked against debt
+ *  patterns, a goal only against goal patterns -- no guessing which
+ *  kind a name might be). Deduplicated by (target, operation, amount);
+ *  a caller (resolveClaim) is responsible for treating "no match" and
+ *  "more than one distinct match for this target" both as fail-closed,
+ *  never as license to guess. */
+/** Does exactly one entity of this kind carry this exact name? If the
+ *  same visible name identifies more than one real debt/goal, BudgetChek
+ *  must not guess which one a scenario means -- parseScenarioIntents
+ *  skips generating an intent for a duplicated name entirely, so the
+ *  caller sees "no supported scenario found" (fail closed / ask which
+ *  one they mean) rather than silently picking whichever entity a
+ *  first-match lookup happens to return. */
+function isNameUniqueInKind(
+  name: string,
+  kind: "debt" | "goal",
+  payload: Record<string, unknown>,
+): boolean {
+  const arr = payload[ENTITY_ARRAY_KEY[kind]];
+  if (!Array.isArray(arr)) return true;
+  const nameField = ENTITY_NAME_FIELD[kind];
+  let count = 0;
+  for (const e of arr) {
+    if (e && typeof e === "object" && (e as Record<string, unknown>)[nameField] === name) count++;
+  }
+  return count <= 1;
+}
+
+function parseScenarioIntents(message: string, payload: Record<string, unknown>): ScenarioIntent[] {
+  const out: ScenarioIntent[] = [];
+  const seen = new Set<string>();
+  const allNames = allRealEntityNames(payload);
+  for (const clause of sentencesOf(message)) {
+    for (const kind of ["debt", "goal"] as const) {
+      const arr = payload[ENTITY_ARRAY_KEY[kind]];
+      if (!Array.isArray(arr)) continue;
+      const nameField = ENTITY_NAME_FIELD[kind];
+      const patterns = kind === "debt" ? DEBT_SCENARIO_PATTERNS : GOAL_SCENARIO_PATTERNS;
+      const field = kind === "debt" ? "balance" : "saved";
+      for (const entity of arr) {
+        if (!entity || typeof entity !== "object") continue;
+        const name = (entity as Record<string, unknown>)[nameField];
+        if (typeof name !== "string") continue;
+        if (!isNameUniqueInKind(name, kind, payload)) continue;
+        const nameRe = name.split(/\s+/).filter(Boolean).map(escapeRegex).join("\\s+");
+        for (const pattern of patterns) {
+          const re = pattern.build(nameRe);
+          const m = re.exec(clause);
+          if (!m) continue;
+          // Round-9 review: a match on a strict prefix of a different,
+          // longer real entity name is shadowed -- the person named
+          // the longer entity, not this one (same guard as
+          // entityReferencedInMessage, applied here independently since
+          // this loop builds its own regex rather than calling that
+          // function).
+          if (isShadowedByLongerEntityName(name, clause, m.index, allNames)) continue;
+          if (isClauseNegated(clause)) continue;
+          const amount = moneyTokenToNumber(m[1]);
+          if (amount == null || !(amount > 0)) continue;
+          const targetFieldPath = `${kind}:${name}.${field}`;
+          const key = `${targetFieldPath}:${pattern.operation}:${amount}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push({
+            targetKind: kind,
+            targetName: name,
+            targetFieldPath,
+            operation: pattern.operation,
+            operandMoney: amount,
+          });
+        }
+      }
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -644,6 +1016,23 @@ function formatDateLong(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
   return dt.toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
+}
+
+/** Does this raw snapshot value actually match its declared FactType?
+ *  See the "fact" branch of resolveClaim's doc comment for why this
+ *  matters -- formatByType has no fail-closed path of its own. */
+function valueMatchesFactType(type: FactType, value: unknown): boolean {
+  switch (type) {
+    case "money":
+    case "percent":
+    case "count":
+      return typeof value === "number" && Number.isFinite(value);
+    case "date":
+    case "text":
+      return typeof value === "string";
+    case "boolean":
+      return typeof value === "boolean";
+  }
 }
 
 function formatByType(type: FactType, value: unknown): string {
@@ -774,14 +1163,32 @@ function resolveStateClaim(claim: Claim, payload: Record<string, unknown>): Clai
           reason: `${code} requires a computed funding plan, which isn't available yet`,
         };
       }
+      // Never let "no shortfall" imply debt timing was evaluated when
+      // it wasn't -- append an honest caveat whenever a real debt
+      // minimum was excluded from this cycle's plan for unknown timing,
+      // baked into BudgetChek's own rendering so it can't be omitted.
+      // Uses the RAW count (see debtsWithUnknownTimingCount's doc
+      // comment) so a malformed entry in the underlying array can't
+      // silently suppress or undercount this caveat.
+      const unknownCount = debtsWithUnknownTimingCount(payload);
+      // Deliberately phrased WITHOUT a leading "<N> debt(s)" count -- that
+      // exact shape is what checkEntityCountClaims's fail-safe treats as
+      // a claim about the TOTAL number of debts on file, which this is
+      // not (it's a count of the subset with unknown timing, almost
+      // always smaller). A real "1 debt" collision was caught here
+      // during round 9's own test matrix before being reported.
+      const caveat =
+        unknownCount > 0
+          ? ` (this doesn't account for ${unknownCount === 1 ? "a debt minimum" : "some debt minimums"} with no known due date, which BudgetChek can't place in this window without guessing)`
+          : "";
       if (code === "has_shortfall") {
         if (!(shortfall > 0))
           return { ok: false, reason: "claimed a shortfall exists, but there isn't one" };
-        return { ok: true, formatted: "there is a shortfall in the current plan" };
+        return { ok: true, formatted: `there is a shortfall in the current plan${caveat}` };
       }
       if (shortfall > 0)
         return { ok: false, reason: "claimed there is no shortfall, but there is one" };
-      return { ok: true, formatted: "the plan is fully covered, with no shortfall" };
+      return { ok: true, formatted: `the plan is fully covered, with no shortfall${caveat}` };
     }
     case "due_present":
     case "due_missing": {
@@ -889,6 +1296,21 @@ function resolveClaim(
         offendingToken: claim.fieldPath,
       };
     }
+    // Round-9 review (pre-existing, not round-9-new, but closed in this
+    // same pass): the "derived" branch below has always guarded that
+    // its resolved value is really a number before formatting it; this
+    // "fact" branch never did. formatMoney's n.toLocaleString silently
+    // stringifies a non-number rather than throwing, so a snapshot
+    // value that doesn't match its declared FieldMeta.type (a "money"
+    // field holding a string, say) rendered unformatted, un-validated
+    // raw text instead of failing closed.
+    if (!valueMatchesFactType(resolved.meta.type, resolved.value)) {
+      return {
+        ok: false,
+        reason: `fieldPath "${claim.fieldPath}" resolved to a value that does not match its declared type -- BudgetChek never renders an unverified or malformed value`,
+        offendingToken: claim.fieldPath,
+      };
+    }
     return {
       ok: true,
       formatted: authoritativePhrase(claim.fieldPath, resolved.meta, resolved.value, false),
@@ -928,7 +1350,10 @@ function resolveClaim(
   // between them is wrong ("$300 toward Store card" cannot derive a
   // hypothetical for Visa card). Never resolved from an earlier turn.
   const entityName = extractEntityName(claim.fieldPath);
-  if (!entityName || !entityReferencedInMessage(entityName, currentUserMessage)) {
+  if (
+    !entityName ||
+    !entityReferencedInMessage(entityName, currentUserMessage, allRealEntityNames(payload))
+  ) {
     return {
       ok: false,
       reason: `derived claim's target "${entityName ?? claim.fieldPath}" is not referenced in the user's current message -- BudgetChek does not resolve a scenario target from prior context`,
@@ -940,6 +1365,17 @@ function resolveClaim(
     return {
       ok: false,
       reason: `derived claim's userOperand "${claim.userOperand}" did not parse as a number`,
+      offendingToken: claim.userOperand,
+    };
+  }
+  // Scenario money operands must be finite and strictly positive.
+  // Direction comes from the operation (add/subtract), never from a
+  // sign on the number -- "-$300" or "$0" are never valid operands,
+  // regardless of what the message says.
+  if (!(operandNum > 0)) {
+    return {
+      ok: false,
+      reason: `derived claim's userOperand "${claim.userOperand}" must be a positive dollar amount greater than zero -- direction comes from the operation, never from a negative operand`,
       offendingToken: claim.userOperand,
     };
   }
@@ -957,18 +1393,67 @@ function resolveClaim(
   // each isn't enough -- they must belong to the SAME clause, or a real
   // dollar figure about one thing (rent) could bind to an unrelated real
   // target merely because both happen to appear in the same message.
-  if (!scenarioClauseBindsOperandAndTarget(currentUserMessage, entityName, operandNum)) {
+  if (!scenarioClauseBindsOperandAndTarget(currentUserMessage, entityName, operandNum, payload)) {
     return {
       ok: false,
       reason: `derived claim's target "${entityName}" and its $${operandNum} scenario figure are not clearly part of the same statement in the user's current message -- BudgetChek does not infer a relationship between separate parts of a message`,
       offendingToken: claim.userOperand,
     };
   }
+  // The operation must come from the person's OWN scenario wording, not
+  // from the model's independent choice. parseScenarioIntents is the
+  // sole, deterministic source of truth for which operation a real
+  // scenario expresses; unknown wording matches nothing (fail closed),
+  // and if the message expresses more than one distinct scenario for
+  // THIS target, BudgetChek does not guess which one a claim means.
+  const matchingScenarios = parseScenarioIntents(currentUserMessage, payload).filter(
+    (s) => s.targetFieldPath === claim.fieldPath,
+  );
+  if (matchingScenarios.length === 0) {
+    return {
+      ok: false,
+      reason: `no supported scenario phrasing in the user's current message expresses a change to "${entityName}" -- BudgetChek does not interpret free-form wording; ask them to state it plainly (e.g. "pay $${operandNum} toward ${entityName}")`,
+      offendingToken: claim.userOperand,
+    };
+  }
+  if (matchingScenarios.length > 1) {
+    return {
+      ok: false,
+      reason: `the user's current message expresses more than one possible amount or direction for "${entityName}" -- BudgetChek does not guess which one a claim refers to`,
+      offendingToken: claim.userOperand,
+    };
+  }
+  const scenario = matchingScenarios[0];
+  if (!moneyClose(scenario.operandMoney, operandNum)) {
+    return {
+      ok: false,
+      reason: `derived claim's userOperand "${claim.userOperand}" does not match the amount in the user's own scenario wording ($${scenario.operandMoney})`,
+      offendingToken: claim.userOperand,
+    };
+  }
+  if (scenario.operation !== claim.operation) {
+    return {
+      ok: false,
+      reason: `derived claim's operation "${claim.operation}" does not match what the user's own scenario wording expresses ("${scenario.operation}") -- the model may not choose a different operation than the person's scenario`,
+      offendingToken: claim.operation,
+    };
+  }
   const result =
     claim.operation === "add" ? resolved.value + operandNum : resolved.value - operandNum;
+  // Never render an impossible derived state -- a debt balance or a
+  // goal's saved amount can't go below zero. BudgetChek does not invent
+  // provider overpayment behavior; it fails closed and lets the model
+  // explain the requested amount exceeds what's on file instead.
+  if (result < -EPS) {
+    return {
+      ok: false,
+      reason: `derived claim's result ($${round2(result)}) would be negative -- the requested amount exceeds "${entityName}"'s real balance; BudgetChek does not render an impossible state`,
+      offendingToken: claim.userOperand,
+    };
+  }
   return {
     ok: true,
-    formatted: derivedHypotheticalPhrase(claim.fieldPath, operandNum, result),
+    formatted: derivedHypotheticalPhrase(claim.fieldPath, operandNum, Math.max(0, result)),
   };
 }
 
@@ -1010,11 +1495,53 @@ function renderFramingSentence(code: FramingCode): string {
   }
 }
 
+/** State codes whose resolveStateClaim branch opens the formatted
+ *  string directly with the raw, on-file entity name (via
+ *  extractEntityName), never BudgetChek's own generic lead-in wording.
+ *  The other 4 state codes (plan_complete/incomplete, has_shortfall/
+ *  no_shortfall) are whole-plan claims with no target and always open
+ *  with fixed wording ("the plan...", "there is..."). */
+const ENTITY_LED_STATE_CODES = new Set<string>([
+  "bill_paid",
+  "bill_unpaid",
+  "due_present",
+  "due_missing",
+  "in_window",
+  "out_of_window",
+  "reserved_tapped",
+  "reserved_not_tapped",
+]);
+
+/** True if a resolved claim's formatted phrase begins directly with a
+ *  raw, on-file entity name at position 0 -- round-9 adversarial
+ *  review: claimAsSentence used to blanket-capitalize the first
+ *  character of EVERY formatted string, which silently mutated a real
+ *  entity name that happens to start lowercase ("eBay card" ->
+ *  "EBay card"), contradicting this module's own guarantee that entity
+ *  identity is rendered exactly as BudgetChek authored it from
+ *  validated data. A 'fact' claim's authoritativePhrase always opens
+ *  with the entity name; a 'derived' claim's derivedHypotheticalPhrase
+ *  never does (it opens with "using..."). */
+function isEntityLedClaim(claim: Claim): boolean {
+  if (claim.kind === "fact") return true;
+  if (claim.kind === "state" && claim.stateCode) return ENTITY_LED_STATE_CODES.has(claim.stateCode);
+  return false;
+}
+
 /** Turns a resolved claim phrase (a noun phrase like "Rent's amount
  *  ($900.00)", a state clause like "the plan is complete", or a bare
- *  value like "$300.00") into a complete, capitalized, period-terminated
- *  sentence for standalone display as its own answerPart. */
-function claimAsSentence(formatted: string): string {
+ *  value like "$300.00") into a complete, period-terminated sentence
+ *  for standalone display as its own answerPart. Only capitalizes the
+ *  leading character when the phrase is NOT entity-led -- an
+ *  entity-led phrase is emitted byte-for-byte as BudgetChek's own
+ *  renderer produced it, since a lowercase-leading real name (an
+ *  entity someone actually typed, like "eBay card") is normal, correct
+ *  English on its own ("eBay's balance is $300.00." needs no cap) and
+ *  must never be silently altered. */
+function claimAsSentence(formatted: string, entityLed: boolean): string {
+  if (entityLed) {
+    return /[.!?]$/.test(formatted) ? formatted : `${formatted}.`;
+  }
   const cap = formatted.charAt(0).toUpperCase() + formatted.slice(1);
   return /[.!?]$/.test(cap) ? cap : `${cap}.`;
 }
@@ -1068,7 +1595,7 @@ function renderAnswerParts(
         const claim = claims[part.claimIndex];
         const res = resolveClaim(claim, payload, currentUserMessage);
         if (!res.ok) return { ok: false, reason: res.reason, offendingToken: res.offendingToken };
-        sentences.push(claimAsSentence(res.formatted));
+        sentences.push(claimAsSentence(res.formatted, isEntityLedClaim(claim)));
         resolvedFacts.push({
           label: res.formatted,
           value: res.formatted,
@@ -1161,10 +1688,33 @@ function fail(reason: string): ActionVerdict {
  *  label: bills by exact name, debts by the engine's own "<name>
  *  minimum" labeling convention -- a debt's current-cycle funding-plan
  *  line item IS its minimum payment, never its balance, which is why
- *  only "amount" (bill) and "minimum" (debt) are matched here at all; a
- *  more stable id-based link on funding items would be more robust
- *  long-term (noted in the return package). Deliberately conservative --
- *  unmatched or ambiguous items are NOT considered affected. */
+ *  only "amount" (bill) and "minimum" (debt) are matched here at all.
+ *  Round-9 adversarial review found this label-only matching could
+ *  misattribute a bill's funded status to a same-labeled debt minimum
+ *  (or vice versa) with no kind to disambiguate, and separately that
+ *  two real entities sharing a display name defeated it too -- both
+ *  closed by requiring the item's own `kind` (decision-engine.ts now
+ *  stamps every RankedItem with one) to match AND requiring the match
+ *  be UNIQUE; more than one candidate is treated as "can't prove it"
+ *  the same as zero, never guessed at via array order. */
+function matchingFundingItemIndices(
+  kind: "bill" | "debt",
+  name: string,
+  items: unknown[],
+): number[] {
+  const expectedLabel = kind === "bill" ? name.toLowerCase() : `${name.toLowerCase()} minimum`;
+  const out: number[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (!item || typeof item !== "object") continue;
+    const it = item as Record<string, unknown>;
+    if (typeof it.label !== "string" || it.label.toLowerCase() !== expectedLabel) continue;
+    if (it.kind !== kind) continue;
+    out.push(i);
+  }
+  return out;
+}
+
 function isShortfallAffectedTarget(fieldPath: string, payload: Record<string, unknown>): boolean {
   const m = fieldPath.match(/^(bill|debt):(.+)\.(amount|minimum)$/);
   if (!m) return false;
@@ -1174,22 +1724,103 @@ function isShortfallAffectedTarget(fieldPath: string, payload: Record<string, un
   const items = funding?.items;
   if (!Array.isArray(items)) return false;
   const cutoff = typeof funding?.cutoffIndex === "number" ? funding.cutoffIndex : -1;
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    if (!item || typeof item !== "object") continue;
-    const label = (item as Record<string, unknown>).label;
-    if (typeof label !== "string") continue;
-    const matches =
-      kind === "bill"
-        ? label.toLowerCase() === name.toLowerCase()
-        : label.toLowerCase() === `${name.toLowerCase()} minimum`;
-    if (!matches) continue;
-    const status = (item as Record<string, unknown>).status;
-    if (status === "partial" || status === "unfunded") return true;
-    if (cutoff >= 0 && i >= cutoff) return true;
-    return false;
-  }
+  const matches = matchingFundingItemIndices(kind as "bill" | "debt", name, items);
+  if (matches.length !== 1) return false; // not found, or ambiguous -- never guess
+  const i = matches[0];
+  const status = (items[i] as Record<string, unknown>).status;
+  if (status === "partial" || status === "unfunded") return true;
+  if (cutoff >= 0 && i >= cutoff) return true;
   return false;
+}
+
+/** The funding-plan line item this fieldPath matches (kind + label,
+ *  see matchingFundingItemIndices), or null if none -- or more than
+ *  one -- matches. "Not found" and "ambiguous" are both treated as
+ *  "can't prove funded" by every caller, never as "assume funded". */
+function findFundingItem(
+  fieldPath: string,
+  payload: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const m = fieldPath.match(/^(bill|debt):(.+)\.(amount|minimum)$/);
+  if (!m) return null;
+  const [, kind, name] = m;
+  const snap = (payload.snapshot ?? {}) as Record<string, unknown>;
+  const funding = snap.funding as { items?: unknown } | undefined;
+  const items = funding?.items;
+  if (!Array.isArray(items)) return null;
+  const matches = matchingFundingItemIndices(kind as "bill" | "debt", name, items);
+  if (matches.length !== 1) return null;
+  return items[matches[0]] as Record<string, unknown>;
+}
+
+/** Is this real, in-window obligation actually FUNDED by the ranked
+ *  plan -- not merely a structurally valid target? A bill or debt
+ *  minimum can be genuinely due in-window and still be "partial" or
+ *  "unfunded" because a higher-priority obligation used up the money
+ *  first. hold_for_due_item/pay_required_minimum must never advise
+ *  paying/holding the full amount in that case -- that's what
+ *  review_shortfall_item/review_obligation_options are for. Since
+ *  buildFundingPlan allocates strictly in rank order, this same check
+ *  also structurally prevents ever recommending a LOWER-priority
+ *  obligation ("pay the Visa minimum") while a HIGHER-priority one
+ *  (Housing) is still short -- a lower-tier item cannot be "funded"
+ *  while an earlier, higher-tier item in the same plan is not. Not
+ *  found in the plan at all counts as NOT funded -- there's nothing to
+ *  prove it with. */
+function isFundingItemFunded(fieldPath: string, payload: Record<string, unknown>): boolean {
+  const item = findFundingItem(fieldPath, payload);
+  return item?.status === "funded";
+}
+
+/** Is this specific bill already marked paid? Debts have no "paid"
+ *  field (they're an ongoing balance, not a one-off bill), so this only
+ *  ever applies to a bill:<name>.* fieldPath. */
+function isBillAlreadyPaid(fieldPath: string, payload: Record<string, unknown>): boolean {
+  const m = fieldPath.match(/^bill:(.+)\.[a-zA-Z]+$/);
+  if (!m) return false;
+  const resolved = resolveFieldPath(`bill:${m[1]}.paid`, payload);
+  return resolved?.value === true;
+}
+
+/** Debts whose minimum is real but whose due date is genuinely unknown
+ *  (never silently assumed either way) -- read straight off the real
+ *  funding plan decision-engine.ts now excludes them from, so this
+ *  module never needs to re-derive it. Empty array (not found /
+ *  malformed) if the field is absent, never a guess. */
+function debtsWithUnknownTiming(
+  payload: Record<string, unknown>,
+): { id: string; creditor: string; minPayment: number }[] {
+  const snap = (payload.snapshot ?? {}) as Record<string, unknown>;
+  const funding = snap.funding as { debtsWithUnknownTiming?: unknown } | undefined;
+  const list = funding?.debtsWithUnknownTiming;
+  if (!Array.isArray(list)) return [];
+  return list.filter(
+    (d): d is { id: string; creditor: string; minPayment: number } =>
+      !!d &&
+      typeof d === "object" &&
+      typeof (d as Record<string, unknown>).creditor === "string" &&
+      typeof (d as Record<string, unknown>).minPayment === "number",
+  );
+}
+
+/** The RAW count of funding.debtsWithUnknownTiming, not the strictly-
+ *  typed filtered count above. Round-9 adversarial review: the
+ *  has_shortfall/no_shortfall/no_action_needed caveat used to gate
+ *  purely on debtsWithUnknownTiming(payload).length -- so a real,
+ *  non-empty array whose entries didn't happen to match the exact
+ *  expected shape (wrong-typed creditor/minPayment, or a missing field)
+ *  produced the EXACT SAME caveat-free rendering as a genuinely empty
+ *  array, silently suppressing or undercounting the honest disclosure
+ *  that a real debt's timing was never evaluated. The caveat text only
+ *  ever needs a COUNT (singular vs plural), never individual creditor
+ *  names, so counting the raw array -- a deterministic fact straight off
+ *  the JSON, never a guess -- is enough to close this without needing
+ *  every entry to be well-formed. */
+function debtsWithUnknownTimingCount(payload: Record<string, unknown>): number {
+  const snap = (payload.snapshot ?? {}) as Record<string, unknown>;
+  const funding = snap.funding as { debtsWithUnknownTiming?: unknown } | undefined;
+  const list = funding?.debtsWithUnknownTiming;
+  return Array.isArray(list) ? list.length : 0;
 }
 
 function validateAction(action: StructuredAction, payload: Record<string, unknown>): ActionVerdict {
@@ -1202,6 +1833,11 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
       if (!action.targetFieldPath) return fail("hold_for_due_item requires a targetFieldPath");
       const billMatch = action.targetFieldPath.match(/^bill:(.+)\.amount$/);
       if (billMatch) {
+        if (isBillAlreadyPaid(action.targetFieldPath, payload)) {
+          return fail(
+            "hold_for_due_item target bill is already marked paid -- nothing left to hold money for",
+          );
+        }
         const due = resolveFieldPath(`bill:${billMatch[1]}.due`, payload);
         const amt = resolveFieldPath(action.targetFieldPath, payload);
         if (!due || !amt || typeof due.value !== "string" || typeof amt.value !== "number") {
@@ -1210,6 +1846,11 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
         if (!window || !withinWindow(due.value, window)) {
           return fail(
             "hold_for_due_item target bill is not due within the current planning window",
+          );
+        }
+        if (!isFundingItemFunded(action.targetFieldPath, payload)) {
+          return fail(
+            "hold_for_due_item target is not actually funded by the ranked plan -- a higher-priority obligation used the money first; use review_shortfall_item or review_obligation_options instead",
           );
         }
         return { ok: true };
@@ -1231,6 +1872,11 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
             "hold_for_due_item target debt's due date is not within the current planning window",
           );
         }
+        if (!isFundingItemFunded(action.targetFieldPath, payload)) {
+          return fail(
+            "hold_for_due_item target is not actually funded by the ranked plan -- a higher-priority obligation used the money first; use review_shortfall_item or review_obligation_options instead",
+          );
+        }
         return { ok: true };
       }
       return fail(
@@ -1240,25 +1886,90 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
 
     case "review_due_date": {
       if (!action.targetFieldPath) return fail("review_due_date requires a targetFieldPath");
-      if (!/^(bill|debt):(.+)\.due$/.test(action.targetFieldPath)) {
+      const dueMatch = action.targetFieldPath.match(/^(bill|debt):(.+)\.due$/);
+      if (!dueMatch) {
         return fail("review_due_date target must be a bill or debt's due field");
+      }
+      const [, dueKind, dueName] = dueMatch;
+      // Round-9 adversarial review: this action had NO funded-status or
+      // paid-status check at all, unlike every sibling that can target
+      // the same bill/debt -- it passed unconditionally for an already-
+      // paid bill, and for a genuinely partial/unfunded item during a
+      // real shortfall, overlapping with review_shortfall_item's
+      // precondition space but rendering materially weaker (misleading
+      // by omission) advice for the identical target.
+      if (dueKind === "bill" && isBillAlreadyPaid(action.targetFieldPath, payload)) {
+        return fail(
+          "review_due_date target bill is already marked paid -- nothing left to review for it",
+        );
       }
       const resolved = resolveFieldPath(action.targetFieldPath, payload);
       if (!resolved || typeof resolved.value !== "string") {
         return fail("review_due_date target has no due date on file to review");
+      }
+      const ownItemFieldPath =
+        dueKind === "bill" ? `bill:${dueName}.amount` : `debt:${dueName}.minimum`;
+      if (
+        typeof funding?.shortfall === "number" &&
+        funding.shortfall > 0 &&
+        isShortfallAffectedTarget(ownItemFieldPath, payload)
+      ) {
+        return fail(
+          "review_due_date target is affected by a real shortfall this cycle -- use review_shortfall_item or review_obligation_options instead, which actually say so",
+        );
       }
       return { ok: true };
     }
 
     case "add_missing_due_date": {
       if (!action.targetFieldPath) return fail("add_missing_due_date requires a targetFieldPath");
-      if (!/^(bill|debt):(.+)\.due$/.test(action.targetFieldPath)) {
-        return fail("add_missing_due_date target must be a bill or debt's due field");
+      // Bills only -- a debt has no due-date field in the product at
+      // all today (no persistent column, no UI field), so recommending
+      // "add" one for a debt would itself be dishonest. See
+      // debt_timing_unavailable for the debt equivalent.
+      if (!/^bill:(.+)\.due$/.test(action.targetFieldPath)) {
+        return fail(
+          "add_missing_due_date target must be a bill's due field -- a debt has no due-date field to add at all; use debt_timing_unavailable instead",
+        );
+      }
+      if (isBillAlreadyPaid(action.targetFieldPath, payload)) {
+        return fail(
+          "add_missing_due_date target bill is already marked paid -- nothing left to add a due date for",
+        );
       }
       const resolved = resolveFieldPath(action.targetFieldPath, payload);
       if (!resolved) return fail("add_missing_due_date target does not resolve to a real item");
       if (resolved.value !== null)
         return fail("add_missing_due_date target already has a due date on file");
+      return { ok: true };
+    }
+
+    case "debt_timing_unavailable": {
+      if (!action.targetFieldPath)
+        return fail("debt_timing_unavailable requires a targetFieldPath");
+      const m = action.targetFieldPath.match(/^debt:(.+)\.minimum$/);
+      if (!m) return fail("debt_timing_unavailable target must be a debt's minimum field");
+      const min = resolveFieldPath(action.targetFieldPath, payload);
+      if (!min || typeof min.value !== "number") {
+        return fail("debt_timing_unavailable target does not resolve to a real minimum payment");
+      }
+      // Round-9 adversarial review: a minimum of 0 (or negative) has no
+      // real obligation to report a timing problem for -- pay_required_-
+      // minimum gets this protection for free via isFundingItemFunded
+      // (buildFundingPlan excludes non-positive minimums entirely), but
+      // this action bypasses funding.items altogether, so the check
+      // must be explicit here.
+      if (!(min.value > 0)) {
+        return fail(
+          "debt_timing_unavailable target does not have a real, positive minimum payment obligation to report a timing problem for",
+        );
+      }
+      const due = resolveFieldPath(`debt:${m[1]}.due`, payload);
+      if (due && due.value !== null) {
+        return fail(
+          "debt_timing_unavailable target already has a real due date on file -- use review_due_date or pay_required_minimum instead",
+        );
+      }
       return { ok: true };
     }
 
@@ -1281,6 +1992,11 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
           "pay_required_minimum target's due date is not within the current planning window",
         );
       }
+      if (!isFundingItemFunded(action.targetFieldPath, payload)) {
+        return fail(
+          "pay_required_minimum target is not actually funded by the ranked plan -- a higher-priority obligation used the money first; use review_shortfall_item or review_obligation_options instead",
+        );
+      }
       return { ok: true };
     }
 
@@ -1295,6 +2011,11 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
       if (!billMatch && !debtMinMatch) {
         return fail(
           "review_shortfall_item target must be a real bill amount, or a real debt's minimum payment -- never a debt's total balance for a current-cycle obligation",
+        );
+      }
+      if (billMatch && isBillAlreadyPaid(action.targetFieldPath, payload)) {
+        return fail(
+          "review_shortfall_item target bill is already marked paid -- nothing left to review for it",
         );
       }
       if (!resolveFieldPath(action.targetFieldPath, payload)) {
@@ -1338,6 +2059,11 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
       if (!billMatch && !debtMinMatch) {
         return fail(
           "review_obligation_options target must be a real bill amount, or a real debt's minimum payment -- never a debt's total balance for a current-cycle obligation",
+        );
+      }
+      if (billMatch && isBillAlreadyPaid(action.targetFieldPath, payload)) {
+        return fail(
+          "review_obligation_options target bill is already marked paid -- nothing left to review for it",
         );
       }
       if (!resolveFieldPath(action.targetFieldPath, payload)) {
@@ -1443,9 +2169,14 @@ function renderActionSentence(action: StructuredAction, payload: Record<string, 
       return `Take a look at ${name}'s due date (${dateOr(action.targetFieldPath ?? "", "on file")}).`;
     }
     case "add_missing_due_date": {
-      const m = action.targetFieldPath?.match(/^(bill|debt):(.+)\.due$/);
-      const name = m?.[2] ?? "this item";
+      const m = action.targetFieldPath?.match(/^bill:(.+)\.due$/);
+      const name = m?.[1] ?? "this item";
       return `Add the due date for ${name} -- it isn't on file yet.`;
+    }
+    case "debt_timing_unavailable": {
+      const m = action.targetFieldPath?.match(/^debt:(.+)\.minimum$/);
+      const name = m?.[1] ?? "this debt";
+      return `BudgetChek doesn't have ${name}'s due date yet, so its minimum payment can't be placed in this paycheck window without guessing.`;
     }
     case "pay_required_minimum": {
       const m = action.targetFieldPath?.match(/^debt:(.+)\.minimum$/);
@@ -1469,8 +2200,34 @@ function renderActionSentence(action: StructuredAction, payload: Record<string, 
       const name = m?.[1] ?? "this reserved fund";
       return `Worth a look: your ${name} reserved fund.`;
     }
-    case "no_action_needed":
-      return "Nothing needs doing right now -- the plan is fully covered.";
+    case "no_action_needed": {
+      // "No action needed" means no PLAN CHANGE is needed -- never
+      // "nothing to pay". Real scheduled obligations may still be due;
+      // this just says the plan doesn't need an exception. It also
+      // never implies debt timing was fully evaluated when it wasn't.
+      // Round-9 review, two wording fixes: (1) uses the RAW count (see
+      // debtsWithUnknownTimingCount) so a malformed entry can't
+      // silently suppress the caveat; (2) the caveat is now fused into
+      // the SAME sentence as the reassurance, matching the
+      // has_shortfall/no_shortfall pattern -- a caveat tacked on as a
+      // separate trailing sentence after an unqualified "No plan change
+      // is needed right now" read as tonally self-contradictory.
+      const unknownCount = debtsWithUnknownTimingCount(payload);
+      const caveat =
+        unknownCount > 0
+          ? ` for what BudgetChek can verify, though this doesn't cover ${unknownCount === 1 ? "a debt minimum" : "some debt minimums"} with no known due date, which BudgetChek can't place in this window`
+          : "";
+      // Also: the second sentence used to always presuppose scheduled
+      // items exist, even when funding.items is genuinely empty.
+      const noActionSnap = (payload.snapshot ?? {}) as Record<string, unknown>;
+      const noActionFunding = noActionSnap.funding as { items?: unknown } | undefined;
+      const hasScheduledItems =
+        Array.isArray(noActionFunding?.items) && noActionFunding.items.length > 0;
+      const secondSentence = hasScheduledItems
+        ? " Keep following the items already scheduled in this paycheck window."
+        : " Nothing is due in this paycheck window right now.";
+      return `No plan change is needed right now${caveat}.${secondSentence}`;
+    }
   }
 }
 
@@ -1508,6 +2265,38 @@ function validateDecisionOption(
       if (!apr || typeof apr.value !== "number" || apr.value <= 0) {
         return fail(
           "prioritize_extra_debt_payment requires a debt with a real, positive APR -- a 0% balance gets the required minimum only, never presented as a discretionary priority choice",
+        );
+      }
+      // Round-9 adversarial review: validateDecision's discretionaryRoom
+      // gate only proves aggregate room across the whole plan -- it says
+      // nothing about whether THIS specific debt's own required minimum
+      // is even accounted for this cycle. Offering extra principal on a
+      // debt whose own obligation is unverified (or genuinely due and
+      // still short-funded) is the same class of gap Part C closed for
+      // the action codes; a discretionary decision needs the identical
+      // guard. Per this file's own comments, every debt's due date is
+      // null in production today, so debtsWithUnknownTiming is the
+      // deciding factor for essentially every real debt right now --
+      // an honest reflection of what can't yet be verified, not an
+      // overreach.
+      const debtName = m[1];
+      if (debtsWithUnknownTiming(payload).some((d) => d.creditor === debtName)) {
+        return fail(
+          "prioritize_extra_debt_payment target's own required minimum has unknown timing this cycle -- BudgetChek cannot confirm it's accounted for before offering extra principal on top of it",
+        );
+      }
+      const optSnap = (payload.snapshot ?? {}) as Record<string, unknown>;
+      const optWindow = (optSnap.window ?? null) as { start: string; end: string } | null;
+      const due = resolveFieldPath(`debt:${debtName}.due`, payload);
+      if (
+        optWindow &&
+        due &&
+        typeof due.value === "string" &&
+        withinWindow(due.value, optWindow) &&
+        !isFundingItemFunded(`debt:${debtName}.minimum`, payload)
+      ) {
+        return fail(
+          "prioritize_extra_debt_payment target's own required minimum is due this cycle but not yet funded by the ranked plan -- resolve that first before offering extra principal on top of it",
         );
       }
       return { ok: true };
@@ -1554,10 +2343,42 @@ function validateDecision(
   // only offered when the plan actually supports discretion. A real
   // shortfall is never offered as equivalent to a genuine preference.
   const snap = (payload.snapshot ?? {}) as Record<string, unknown>;
-  const funding = snap.funding as { shortfall?: number } | undefined;
+  const funding = snap.funding as
+    { shortfall?: number; available?: number; totalRequested?: number } | undefined;
   if (snap.complete !== true || (typeof funding?.shortfall === "number" && funding.shortfall > 0)) {
     return fail(
       "a discretionary decision requires the plan to be complete with no real shortfall -- a real shortfall must be reviewed first, not offered as an equivalent choice",
+    );
+  }
+  // Complete + no shortfall isn't enough on its own -- available could
+  // exactly equal totalRequested, leaving genuinely nothing free to
+  // allocate. A real discretionary decision requires real room above
+  // what's already required. Round-9 adversarial review: typeof alone
+  // is true for NaN/Infinity too (a JSON numeric literal with a huge
+  // exponent like 1e400 silently overflows to Infinity on parse, which
+  // is NOT a NaN-shaped value and so isn't caught by a naive check), and
+  // neither Infinity nor a negative available/totalRequested pair is a
+  // legitimate discretionary-room signal -- Number.isFinite plus a
+  // non-negativity requirement on both figures closes all three.
+  const available = funding?.available;
+  const totalRequested = funding?.totalRequested;
+  if (
+    typeof available === "number" &&
+    typeof totalRequested === "number" &&
+    Number.isFinite(available) &&
+    Number.isFinite(totalRequested) &&
+    available >= 0 &&
+    totalRequested >= 0
+  ) {
+    const discretionaryRoom = round2(available - totalRequested);
+    if (!(discretionaryRoom > 0)) {
+      return fail(
+        "a discretionary decision requires real discretionary room above what's already required -- available funds exactly cover (or fall short of) required obligations, leaving nothing free to allocate",
+      );
+    }
+  } else {
+    return fail(
+      "a discretionary decision requires a computed funding plan with known, finite, non-negative available/totalRequested figures to prove real discretionary room exists",
     );
   }
   for (const option of decision.options) {
@@ -2000,6 +2821,7 @@ const ACTION_CODES = [
   "compare_user_priorities",
   "review_reserved_fund",
   "no_action_needed",
+  "debt_timing_unavailable",
 ] as const;
 
 const DECISION_CODES = [

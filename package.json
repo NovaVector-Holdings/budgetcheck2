@@ -11,7 +11,9 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "validate:learn-registry": "tsx scripts/validate-learn-registry.ts"
+    "validate:learn-registry": "tsx scripts/validate-learn-registry.ts",
+    "validate:grounding": "tsx scripts/prove-grounding.ts",
+    "validate:decision-engine": "tsx scripts/prove-decision-engine.ts"
   },
   "dependencies": {
     "@fontsource/fraunces": "^5.2.9",

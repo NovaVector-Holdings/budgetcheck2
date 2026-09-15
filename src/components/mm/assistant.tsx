@@ -97,7 +97,15 @@ export function Assistant({ userId, snapshot, context }: Props) {
         { role: "user" as const, content: text },
       ];
       const res = await ask({
-        data: { messages: history.slice(-20), snapshot: JSON.stringify({ snapshot, ...context }) },
+        // `snapshot` spreads LAST, deliberately: round-9 adversarial
+        // review flagged that `{ snapshot, ...context }` would let a
+        // future `context` key literally named "snapshot" silently
+        // shadow the real EngineSnapshot object. `context`'s keys are
+        // fixed today (accounts/reserved/caps/bills/debts/goals/
+        // payFrequency/nextPayDate) with no collision, but nothing in
+        // its type enforces that -- spreading it first makes this
+        // structurally safe rather than merely accidentally safe.
+        data: { messages: history.slice(-20), snapshot: JSON.stringify({ ...context, snapshot }) },
       });
 
       await supabase

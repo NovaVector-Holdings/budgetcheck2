@@ -92,17 +92,61 @@ function buildSnapshot(
     shortfall?: number;
     complete?: boolean;
     reservedTapped?: number;
-    /** Appends extra funding-plan line items, each explicitly "partial"
-     *  -- for testing review_shortfall_item / review_obligation_options'
-     *  requirement that a target be one of the items the plan actually
-     *  flags as shortfall-affected, independent of Rent/Water bill's own
-     *  status. Debt entries use the engine's real "<name> minimum" label
-     *  convention -- a debt's current-cycle funding-plan line item is
-     *  always its minimum payment, never its balance. */
-    extraShortfallItems?: Array<{ kind: "bill" | "debt"; name: string }>;
+    /** Debts excluded from the funding plan because their timing is
+     *  genuinely unknown (mirrors decision-engine.ts's real
+     *  FundingPlan.debtsWithUnknownTiming) -- drives the honest caveat
+     *  on no_shortfall/no_action_needed and the debt_timing_unavailable
+     *  action. Empty by default (nothing excluded). */
+    debtsWithUnknownTiming?: Array<{ id: string; creditor: string; minPayment: number }>;
+    /** Appends extra funding-plan line items, each carrying whatever
+     *  `status` is given (defaulting to "partial", the round-6/7
+     *  behavior, when omitted) -- for testing review_shortfall_item /
+     *  review_obligation_options / hold_for_due_item / pay_required_-
+     *  minimum's requirement that a target's OWN line item actually be
+     *  in a specific state, independent of Rent/Water bill's own
+     *  status. Debt entries use the engine's real "<name> minimum"
+     *  label convention -- a debt's current-cycle funding-plan line
+     *  item is always its minimum payment, never its balance. */
+    extraShortfallItems?: Array<{
+      kind: "bill" | "debt";
+      name: string;
+      status?: "funded" | "partial" | "unfunded";
+    }>;
+    /** How much MORE `available` is than `totalRequested` when
+     *  shortfall is 0 -- the deterministic discretionary room a
+     *  discretionary decision requires be > 0. Defaults to 150 (real
+     *  room); set to 0 to test the "no real surplus" rejection. Ignored
+     *  when `shortfall` > 0 (available is then set to exactly
+     *  totalRequested - shortfall, consistent with a real shortfall). */
+    discretionaryRoom?: number;
+    /** Rent's OWN funding-plan line item is short-funded (a higher-
+     *  priority obligation, uncovered) -- the only override that can put
+     *  the tier-1 item itself into "partial" status, since neither
+     *  `shortfall` nor `extraShortfallItems` can touch Rent's entry.
+     *  Forces a real, nonzero funding.shortfall too (defaulting to 600
+     *  unless `shortfall` is explicitly given) so review_shortfall_item
+     *  /review_obligation_options's own "requires a real shortfall"
+     *  check is satisfied without the caller having to reason about the
+     *  internal shortfall/available bookkeeping by hand. */
+    rentPartial?: boolean;
+    /** Marks one bill (by exact name, base or extra) paid: true in the
+     *  `bills` array -- for proving hold_for_due_item / pay_required_-
+     *  minimum / review_shortfall_item / review_obligation_options all
+     *  reject an already-paid bill regardless of its funding-plan
+     *  status. */
+    billPaid?: string;
   } = {},
 ) {
-  const shortfall = overrides.shortfall ?? 0;
+  const rentPartial = overrides.rentPartial ?? false;
+  const shortfall = overrides.shortfall ?? (rentPartial ? 600 : 0);
+  // The only two default items with a nonzero amount are Rent (900) and
+  // Water bill (150) -- extraShortfallItems all carry amount: 0, so they
+  // never need to be added in here to keep this consistent.
+  const totalRequested = 900 + 150;
+  const available =
+    shortfall > 0
+      ? totalRequested - shortfall
+      : totalRequested + (overrides.discretionaryRoom ?? 150);
   return JSON.stringify({
     snapshot: {
       complete: overrides.complete ?? true,
@@ -114,9 +158,10 @@ function buildSnapshot(
         lowPoint: { date: "2026-09-18", balance: 335 },
       },
       funding: {
-        available: 640,
+        available,
         items: [
           {
+            kind: "bill",
             id: "1",
             label: "Rent",
             amount: 900,
@@ -124,10 +169,11 @@ function buildSnapshot(
             tierLabel: "Housing",
             dueDate: "2026-09-20",
             reasonMoved: overrides.reasonMoved ?? null,
-            funded: 900,
-            status: "funded",
+            funded: rentPartial ? 300 : 900,
+            status: rentPartial ? "partial" : "funded",
           },
           {
+            kind: "bill",
             id: "2",
             label: "Water bill",
             amount: 150,
@@ -139,6 +185,7 @@ function buildSnapshot(
             status: shortfall > 0 ? "partial" : "funded",
           },
           ...(overrides.extraShortfallItems ?? []).map((it, i) => ({
+            kind: it.kind,
             id: `extra-${i}`,
             label: it.kind === "bill" ? it.name : `${it.name} minimum`,
             amount: 0,
@@ -147,12 +194,13 @@ function buildSnapshot(
             dueDate: null,
             reasonMoved: null,
             funded: 0,
-            status: "partial",
+            status: it.status ?? "partial",
           })),
         ],
         cutoffIndex: shortfall > 0 ? 1 : -1,
-        totalRequested: 1200,
+        totalRequested,
         shortfall,
+        debtsWithUnknownTiming: overrides.debtsWithUnknownTiming ?? [],
         takeaway: "You're covered through the 20th, with $335.00 estimated to remain.",
       },
       rebuilds: [],
@@ -177,7 +225,9 @@ function buildSnapshot(
       ...(overrides.extraBillName
         ? [{ name: overrides.extraBillName, amount: 40, due: "2026-09-16", paid: false }]
         : []),
-    ],
+    ].map((b) =>
+      overrides.billPaid != null && b.name === overrides.billPaid ? { ...b, paid: true } : b,
+    ),
     debts: [
       { name: "Visa card", balance: 1200, apr: 24.99, minimum: 35, due: null },
       { name: "Store card", balance: 300, apr: 0, minimum: 25, due: null },
@@ -547,6 +597,9 @@ const CASES: Case[] = [
       nextActionType: "concrete_action",
       action: { code: "pay_required_minimum", targetFieldPath: "debt:Phone plan.minimum" },
     },
+    snapshotJson: buildSnapshot({
+      extraShortfallItems: [{ kind: "debt", name: "Phone plan", status: "funded" }],
+    }),
     expectGrounded: false,
     expectReasonIncludes: "requires exactly one action part",
   },
@@ -572,6 +625,9 @@ const CASES: Case[] = [
       nextActionType: "concrete_action",
       action: { code: "pay_required_minimum", targetFieldPath: "debt:Phone plan.minimum" },
     },
+    snapshotJson: buildSnapshot({
+      extraShortfallItems: [{ kind: "debt", name: "Phone plan", status: "funded" }],
+    }),
     expectGrounded: true,
   },
   {
@@ -584,6 +640,9 @@ const CASES: Case[] = [
       nextActionType: "concrete_action",
       action: { code: "pay_required_minimum", targetFieldPath: "debt:Phone plan.minimum" },
     },
+    snapshotJson: buildSnapshot({
+      extraShortfallItems: [{ kind: "debt", name: "Phone plan", status: "funded" }],
+    }),
     expectGrounded: false,
     expectReasonIncludes: "at most one action part",
   },
@@ -1116,6 +1175,9 @@ const CASES: Case[] = [
       nextActionType: "concrete_action",
       action: { code: "pay_required_minimum", targetFieldPath: "debt:Phone plan.minimum" },
     },
+    snapshotJson: buildSnapshot({
+      extraShortfallItems: [{ kind: "debt", name: "Phone plan", status: "funded" }],
+    }),
     expectGrounded: true,
   },
   {
@@ -1132,7 +1194,10 @@ const CASES: Case[] = [
     expectReasonIncludes: "not within the current planning window",
   },
   {
-    name: "add_missing_due_date on a debt whose due date is genuinely missing -> PASS",
+    // Round 9: add_missing_due_date is now BILL-only -- a debt has no
+    // due-date field to "add" in the product at all. debt_timing_-
+    // unavailable is the debt equivalent (test below).
+    name: "add_missing_due_date on a DEBT is categorically rejected -- debts have no due-date field to add -> FAIL",
     userMessage: "Does my medical bill have a due date?",
     response: {
       answerParts: [{ type: "action" }],
@@ -1140,6 +1205,19 @@ const CASES: Case[] = [
       missing: [],
       nextActionType: "concrete_action",
       action: { code: "add_missing_due_date", targetFieldPath: "debt:Medical bill.due" },
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "a debt has no due-date field to add",
+  },
+  {
+    name: "debt_timing_unavailable on a debt whose due date is genuinely missing -> PASS",
+    userMessage: "Does my medical bill have a due date?",
+    response: {
+      answerParts: [{ type: "action" }],
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "debt_timing_unavailable", targetFieldPath: "debt:Medical bill.minimum" },
     },
     expectGrounded: true,
   },
@@ -1156,17 +1234,17 @@ const CASES: Case[] = [
     expectGrounded: true,
   },
   {
-    name: "add_missing_due_date, but the target's due date already exists -> FAIL",
+    name: "debt_timing_unavailable, but the target's due date already exists -> FAIL",
     userMessage: "Does my car loan have a due date?",
     response: {
       answerParts: [{ type: "action" }],
       claims: [],
       missing: [],
       nextActionType: "concrete_action",
-      action: { code: "add_missing_due_date", targetFieldPath: "debt:Car loan.due" },
+      action: { code: "debt_timing_unavailable", targetFieldPath: "debt:Car loan.minimum" },
     },
     expectGrounded: false,
-    expectReasonIncludes: "already has a due date",
+    expectReasonIncludes: "already has a real due date",
   },
   {
     name: "hold_for_due_item on a real bill due WITHIN the window -> PASS",
@@ -1216,6 +1294,9 @@ const CASES: Case[] = [
       nextActionType: "concrete_action",
       action: { code: "hold_for_due_item", targetFieldPath: "debt:Phone plan.minimum" },
     },
+    snapshotJson: buildSnapshot({
+      extraShortfallItems: [{ kind: "debt", name: "Phone plan", status: "funded" }],
+    }),
     expectGrounded: true,
   },
   {
@@ -1465,6 +1546,820 @@ const CASES: Case[] = [
     },
     snapshotJson: buildSnapshot({ extraDebtName: "US Bank card" }),
     expectGrounded: true,
+  },
+
+  // ===================================================================
+  // Round 9: SCENARIO SEMANTICS -- BudgetChek owns the arithmetic
+  // intent. parseScenarioIntents independently derives the target/
+  // operation/amount from the person's own words; a claim must match
+  // it exactly.
+  // ===================================================================
+  {
+    name: "scenario: wrong operation -- user says 'pay' (subtract) but the claim says 'add' -> FAIL",
+    userMessage: "What if I pay $300 toward Visa card?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "add",
+          userOperand: "$300",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "does not match what the user's own scenario wording expresses",
+  },
+  {
+    name: "scenario: negation -- 'Don't pay $300 toward Visa card' must NOT become a subtract scenario -> FAIL",
+    userMessage: "Don't pay $300 toward Visa card.",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "$300",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "no supported scenario phrasing",
+  },
+  {
+    name: "scenario: negation (can't) -- 'I can't put $300 toward Visa card' is not the person proposing that payment -> FAIL",
+    userMessage: "I can't put $300 toward Visa card.",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "$300",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "no supported scenario phrasing",
+  },
+  {
+    name: "scenario: multiple money values -- 'My rent is $300 and I want to put $50 toward Visa card', $50 is the correct binding -> PASS",
+    userMessage: "My rent is $300 and I want to put $50 toward Visa card.",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "$50",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: true,
+  },
+  {
+    name: "scenario: multiple money values -- same message, $300 is really about rent, not Visa card -> FAIL",
+    userMessage: "My rent is $300 and I want to put $50 toward Visa card.",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "$300",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "does not match the amount in the user's own scenario wording",
+  },
+  {
+    name: "scenario: wrong target -- 'take $50 from Vacation fund' with a claim targeting Emergency fund -> FAIL",
+    userMessage: "What if I take $50 from Vacation fund?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "goal:Emergency fund.saved",
+          operation: "subtract",
+          userOperand: "$50",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "is not referenced in the user's current message",
+  },
+  {
+    name: "scenario: negative operand -- '-$300' is never a valid operand, direction comes from the operation -> FAIL",
+    userMessage: "What if I put $300 toward Visa card?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "-$300",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "must be a positive dollar amount greater than zero",
+  },
+  {
+    name: "scenario: zero operand -- '$0' is never a valid operand -> FAIL",
+    userMessage: "What if I put $0 toward Visa card?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "$0",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "must be a positive dollar amount greater than zero",
+  },
+  {
+    name: "scenario: overpay a debt below zero -- Visa card balance is $1,200, paying $1,500 must not render a negative balance -> FAIL",
+    userMessage: "What if I pay $1500 toward Visa card?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "$1500",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "would be negative",
+  },
+  {
+    name: "scenario: withdraw a goal below zero -- Emergency fund has $250 saved, withdrawing $300 must not render a negative saved amount -> FAIL",
+    userMessage: "What if I take $300 from Emergency fund?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "goal:Emergency fund.saved",
+          operation: "subtract",
+          userOperand: "$300",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "would be negative",
+  },
+  {
+    name: "scenario: correct debt CHARGE (add) -- 'charge $200 to Visa card' -> PASS",
+    userMessage: "What if I charge $200 to Visa card?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "add",
+          userOperand: "$200",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: true,
+  },
+  {
+    name: "scenario: correct goal CONTRIBUTION (add) -- 'save $100 toward Emergency fund' -> PASS",
+    userMessage: "What if I save $100 toward Emergency fund?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "goal:Emergency fund.saved",
+          operation: "add",
+          userOperand: "$100",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: true,
+  },
+  {
+    name: "scenario: correct goal WITHDRAWAL (subtract) -- 'withdraw $50 from Emergency fund' -> PASS",
+    userMessage: "What if I withdraw $50 from Emergency fund?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "goal:Emergency fund.saved",
+          operation: "subtract",
+          userOperand: "$50",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: true,
+  },
+  {
+    // Two debts sharing the exact same name are now caught at the very
+    // top of resolveClaim -- resolveFieldPath itself fails closed on an
+    // ambiguous name (round-9 review fix) before ever reaching the
+    // scenario-parser's own separate isNameUniqueInKind guard, which
+    // still independently protects parseScenarioIntents too (see the
+    // "ENGINE"/prove-decision-engine-adjacent scenario tests above for
+    // cases that clear field-path resolution but not scenario parsing).
+    name: "scenario: duplicate target names -- two debts share the exact same name, no scenario is derived for either -> FAIL",
+    userMessage: "What if I pay $300 toward Visa card?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "$300",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    snapshotJson: buildSnapshot({ extraDebtName: "Visa card" }),
+    expectGrounded: false,
+    expectReasonIncludes: "does not resolve to anything real",
+  },
+
+  // ===================================================================
+  // Round 9: ACTIONS ALIGNED WITH THE RANKED PLAN. A structurally valid
+  // obligation is not automatically the correct action.
+  // ===================================================================
+  {
+    name: "actions: hold_for_due_item on a bill already marked paid -> FAIL",
+    userMessage: "What should I keep aside for rent?",
+    response: {
+      answerParts: [{ type: "action" }],
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "hold_for_due_item", targetFieldPath: "bill:Rent.amount" },
+    },
+    snapshotJson: buildSnapshot({ billPaid: "Rent" }),
+    expectGrounded: false,
+    expectReasonIncludes: "already marked paid",
+  },
+  {
+    name: "actions: review_shortfall_item on a bill already marked paid, even though it's shortfall-affected -> FAIL",
+    userMessage: "What happens with the water bill if money's short?",
+    response: {
+      answerParts: [{ type: "action" }],
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "review_shortfall_item", targetFieldPath: "bill:Water bill.amount" },
+    },
+    snapshotJson: buildSnapshot({ shortfall: 75, billPaid: "Water bill" }),
+    expectGrounded: false,
+    expectReasonIncludes: "already marked paid",
+  },
+  {
+    name: "actions: review_obligation_options on a bill already marked paid, even though it's shortfall-affected -> FAIL",
+    userMessage: "What are my options for the water bill?",
+    response: {
+      answerParts: [{ type: "action" }],
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "review_obligation_options", targetFieldPath: "bill:Water bill.amount" },
+    },
+    snapshotJson: buildSnapshot({ shortfall: 75, billPaid: "Water bill" }),
+    expectGrounded: false,
+    expectReasonIncludes: "already marked paid",
+  },
+  {
+    // Priority consistency: Housing (Rent) is short-funded here (a
+    // deliberately reversed fixture where Rent itself is the affected
+    // item), and the Visa card minimum -- a genuinely LOWER-priority,
+    // structurally valid, in-window obligation -- is still marked
+    // "funded" by construction. pay_required_minimum must not recommend
+    // paying it while a higher-priority obligation is uncovered. Since
+    // the real engine allocates strictly in rank order, a lower-tier
+    // item can never actually be "funded" while an earlier, higher-tier
+    // item isn't -- this proves isFundingItemFunded enforces that even
+    // when a test fixture tries to construct the inconsistent shape
+    // directly (the fixture below intentionally marks Visa's line item
+    // "funded" to test that the ACTION check alone -- not just engine
+    // trust -- would still be the thing stopping this in a real engine
+    // output, by confirming the fixture's ability to represent it is
+    // not itself a decision-engine bug elsewhere in this file).
+    name: "actions: lower-priority debt minimum is funded (per the plan's own ranking) while Rent (higher priority) is uncovered -- pay_required_minimum on Rent is the correct action, not the debt",
+    userMessage: "What should I do about rent, given money's short?",
+    response: {
+      answerParts: [{ type: "action" }],
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "review_shortfall_item", targetFieldPath: "bill:Rent.amount" },
+    },
+    snapshotJson: buildSnapshot({
+      rentPartial: true,
+      extraShortfallItems: [{ kind: "debt", name: "Phone plan", status: "funded" }],
+    }),
+    expectGrounded: true,
+  },
+  {
+    name: "actions: pay_required_minimum on the lower-priority debt while Rent (higher priority) is genuinely uncovered -> FAIL",
+    userMessage: "What should I do about my phone plan?",
+    response: {
+      answerParts: [{ type: "action" }],
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "pay_required_minimum", targetFieldPath: "debt:Phone plan.minimum" },
+    },
+    snapshotJson: buildSnapshot({ rentPartial: true }),
+    expectGrounded: false,
+    expectReasonIncludes: "not actually funded by the ranked plan",
+  },
+
+  // ===================================================================
+  // Round 9: DISCRETIONARY DECISIONS REQUIRE REAL DISCRETIONARY ROOM.
+  // ===================================================================
+  {
+    name: "decisions: zero surplus -- available exactly equals totalRequested, no discretionary decision -> FAIL",
+    userMessage: "Extra money: emergency fund or extra Visa payment?",
+    response: {
+      answerParts: [{ type: "decision" }],
+      claims: [],
+      missing: [],
+      nextActionType: "user_decision",
+      decision: {
+        options: [
+          { code: "prioritize_goal", targetFieldPath: "goal:Emergency fund.saved" },
+          { code: "prioritize_extra_debt_payment", targetFieldPath: "debt:Visa card.balance" },
+        ],
+      },
+    },
+    snapshotJson: buildSnapshot({ discretionaryRoom: 0 }),
+    expectGrounded: false,
+    expectReasonIncludes: "requires real discretionary room",
+  },
+  {
+    name: "decisions: positive surplus -- the same legitimate choice, real discretionary room -> PASS",
+    userMessage: "Extra money: emergency fund or extra Visa payment?",
+    response: {
+      answerParts: [{ type: "decision" }],
+      claims: [],
+      missing: [],
+      nextActionType: "user_decision",
+      decision: {
+        options: [
+          { code: "prioritize_goal", targetFieldPath: "goal:Emergency fund.saved" },
+          { code: "prioritize_extra_debt_payment", targetFieldPath: "debt:Visa card.balance" },
+        ],
+      },
+    },
+    snapshotJson: buildSnapshot({ discretionaryRoom: 50 }),
+    expectGrounded: true,
+  },
+
+  // ===================================================================
+  // Round 9: DEBT-TIMING SOURCE OF TRUTH -- whole-plan coverage must not
+  // overclaim unknown debt timing. See scripts/prove-decision-engine.ts
+  // for the upstream engine-level tests; these confirm the ASSISTANT's
+  // own rendering carries the honest caveat automatically.
+  // ===================================================================
+  {
+    name: "debt-timing: no_shortfall state claim, plan genuinely has no shortfall but a real debt's timing is unknown -> PASS, with the caveat baked into the rendered fact (not model-optional)",
+    userMessage: "Is my plan covered?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [{ kind: "state", stateCode: "no_shortfall" }],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    snapshotJson: buildSnapshot({
+      debtsWithUnknownTiming: [{ id: "d1", creditor: "Visa card", minPayment: 35 }],
+    }),
+    expectGrounded: true,
+  },
+  {
+    name: "debt-timing: no_action_needed when the plan is complete/no-shortfall but a real debt's timing is unknown -> PASS, wording no longer implies nothing is due",
+    userMessage: "Am I okay?",
+    response: {
+      answerParts: [{ type: "action" }],
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "no_action_needed" },
+    },
+    snapshotJson: buildSnapshot({
+      debtsWithUnknownTiming: [{ id: "d1", creditor: "Visa card", minPayment: 35 }],
+    }),
+    expectGrounded: true,
+  },
+
+  // ===================================================================
+  // Round 9 CLOSURE: fixes from the 7-boundary adversarial review that
+  // found real defects in round 9's own new code. Every finding that
+  // was fixed gets a regression test reproducing the review's own
+  // repro, not just a description.
+  // ===================================================================
+  {
+    // The negation gap: an explicit trailing refusal in the SAME clause
+    // ("...don't do it") was never inspected -- only text BEFORE the
+    // matched phrase was checked.
+    name: "review-fix: negation AFTER the matched phrase, same clause ('Pay $300 toward Visa card, don't do it') -> FAIL",
+    userMessage: "Pay $300 toward Visa card, don't do it",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "$300",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "no supported scenario phrasing",
+  },
+  {
+    name: "review-fix: negation form previously missing from the alternation -- 'I wouldn't pay $300 toward Visa card' -> FAIL",
+    userMessage: "I wouldn't pay $300 toward Visa card",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "$300",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "no supported scenario phrasing",
+  },
+  {
+    name: "review-fix: negation form previously missing -- 'I refuse to pay $300 toward Visa card' -> FAIL",
+    userMessage: "I refuse to pay $300 toward Visa card",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "$300",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "no supported scenario phrasing",
+  },
+  {
+    name: "review-fix: negation form previously missing -- 'No way I'd put $300 toward Visa card' -> FAIL",
+    userMessage: "No way I'd put $300 toward Visa card",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "$300",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "no supported scenario phrasing",
+  },
+  {
+    name: "review-fix: negation form previously missing -- 'I ain't paying $300 toward Visa card' -> FAIL",
+    userMessage: "I ain't paying $300 toward Visa card",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "$300",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "no supported scenario phrasing",
+  },
+  {
+    // The entity-prefix-collision gap: a shorter real debt name ("Visa")
+    // is a strict prefix of a different, longer real debt name ("Visa
+    // card"). The message names ONLY the longer one; a claim targeting
+    // the shorter, different entity must not be treated as referenced.
+    name: "review-fix: a real debt name that's a strict prefix of a different, longer real debt name is NOT shadowed into a false reference -> FAIL",
+    userMessage: "What if I pay $300 toward Visa card?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa.balance",
+          operation: "subtract",
+          userOperand: "$300",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    snapshotJson: buildSnapshot({ extraDebtName: "Visa" }),
+    expectGrounded: false,
+    expectReasonIncludes: "is not referenced in the user's current message",
+  },
+  {
+    name: "review-fix: same prefix-collision guard applies to goals -- 'Emergency' vs 'Emergency fund' -> FAIL",
+    userMessage: "What if I save $100 toward Emergency fund?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "goal:Emergency.saved",
+          operation: "add",
+          userOperand: "$100",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    snapshotJson: buildSnapshot({ extraGoalName: "Emergency" }),
+    expectGrounded: false,
+    expectReasonIncludes: "is not referenced in the user's current message",
+  },
+  {
+    // The funding-item label-collision gap: a bill whose own label text
+    // happens to equal a debt-minimum-style label must never let the
+    // debt's own funded status be read off the BILL's item instead.
+    name: "review-fix: a bill sharing a debt-minimum-style label is not misattributed to the debt (kind discriminator) -> FAIL",
+    userMessage: "Can I pay the Phone plan minimum?",
+    response: {
+      answerParts: [{ type: "action" }],
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "pay_required_minimum", targetFieldPath: "debt:Phone plan.minimum" },
+    },
+    snapshotJson: buildSnapshot({
+      extraBillName: "Phone plan minimum",
+      extraShortfallItems: [{ kind: "bill", name: "Phone plan minimum", status: "funded" }],
+    }),
+    expectGrounded: false,
+    expectReasonIncludes: "not actually funded by the ranked plan",
+  },
+  {
+    // The funding-item ambiguity gap: two items genuinely sharing the
+    // same kind+label must fail closed (never guess which one), same
+    // "no guessing" rule the fixture-level resolveFieldPath ambiguity
+    // fix applies to payload.debts/goals.
+    name: "review-fix: two funding-plan items ambiguously sharing the same kind+label -- never guess which one -> FAIL",
+    userMessage: "Can I pay the Phone plan minimum?",
+    response: {
+      answerParts: [{ type: "action" }],
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "pay_required_minimum", targetFieldPath: "debt:Phone plan.minimum" },
+    },
+    snapshotJson: buildSnapshot({
+      extraShortfallItems: [
+        { kind: "debt", name: "Phone plan", status: "funded" },
+        { kind: "debt", name: "Phone plan", status: "unfunded" },
+      ],
+    }),
+    expectGrounded: false,
+    expectReasonIncludes: "not actually funded by the ranked plan",
+  },
+  {
+    // resolveFieldPath's own ambiguity guard, exercised via a GOAL (the
+    // earlier duplicate-name regression test only covered debts).
+    name: "review-fix: resolveFieldPath fails closed on two goals sharing the exact same name -> FAIL",
+    userMessage: "How much have I saved toward Emergency fund?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [{ kind: "fact", fieldPath: "goal:Emergency fund.saved" }],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    snapshotJson: buildSnapshot({ extraGoalName: "Emergency fund" }),
+    expectGrounded: false,
+    expectReasonIncludes: "does not resolve to anything real",
+  },
+  {
+    name: "review-fix: negative available never proves real discretionary room, even if the arithmetic difference is positive -> FAIL",
+    userMessage: "Extra money: emergency fund or extra Visa payment?",
+    response: {
+      answerParts: [{ type: "decision" }],
+      claims: [],
+      missing: [],
+      nextActionType: "user_decision",
+      decision: {
+        options: [
+          { code: "prioritize_goal", targetFieldPath: "goal:Emergency fund.saved" },
+          { code: "prioritize_extra_debt_payment", targetFieldPath: "debt:Visa card.balance" },
+        ],
+      },
+    },
+    snapshotJson: buildSnapshot({ discretionaryRoom: -2000 }),
+    expectGrounded: false,
+    expectReasonIncludes: "requires a computed funding plan with known, finite, non-negative",
+  },
+  {
+    name: "review-fix: debt_timing_unavailable on a debt with minimum 0 -- no real obligation to report a timing problem for -> FAIL",
+    userMessage: "What's going on with my other card's due date?",
+    response: {
+      answerParts: [{ type: "action" }],
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "debt_timing_unavailable", targetFieldPath: "debt:Zero min card.minimum" },
+    },
+    snapshotJson: (() => {
+      const parsed = JSON.parse(buildSnapshot());
+      parsed.debts.push({ name: "Zero min card", balance: 500, apr: 19.99, minimum: 0, due: null });
+      return JSON.stringify(parsed);
+    })(),
+    expectGrounded: false,
+    expectReasonIncludes: "does not have a real, positive minimum payment obligation",
+  },
+  {
+    name: "review-fix: review_due_date on an already-paid bill -> FAIL",
+    userMessage: "When is rent due?",
+    response: {
+      answerParts: [{ type: "action" }],
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "review_due_date", targetFieldPath: "bill:Rent.due" },
+    },
+    snapshotJson: buildSnapshot({ billPaid: "Rent" }),
+    expectGrounded: false,
+    expectReasonIncludes: "already marked paid",
+  },
+  {
+    name: "review-fix: review_due_date on a real shortfall-affected item omits the shortfall -- redirected to review_shortfall_item instead -> FAIL",
+    userMessage: "When is the water bill due?",
+    response: {
+      answerParts: [{ type: "action" }],
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "review_due_date", targetFieldPath: "bill:Water bill.due" },
+    },
+    snapshotJson: buildSnapshot({ shortfall: 75 }),
+    expectGrounded: false,
+    expectReasonIncludes: "affected by a real shortfall this cycle",
+  },
+  {
+    name: "review-fix: add_missing_due_date on an already-paid bill -> FAIL",
+    userMessage: "Does the subscription have a due date on file?",
+    response: {
+      answerParts: [{ type: "action" }],
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "add_missing_due_date", targetFieldPath: "bill:Subscription.due" },
+    },
+    snapshotJson: buildSnapshot({ billPaid: "Subscription" }),
+    expectGrounded: false,
+    expectReasonIncludes: "already marked paid",
+  },
+  {
+    // Today every debt's due date is null in production (no persistent
+    // column exists), so this is the realistic default state, not a
+    // contrived one -- prioritize_extra_debt_payment must not offer
+    // extra principal on a debt whose own required minimum is
+    // unverified this cycle.
+    name: "review-fix: prioritize_extra_debt_payment on a debt whose own minimum has unknown timing this cycle -> FAIL",
+    userMessage: "Extra money: emergency fund or extra Visa payment?",
+    response: {
+      answerParts: [{ type: "decision" }],
+      claims: [],
+      missing: [],
+      nextActionType: "user_decision",
+      decision: {
+        options: [
+          { code: "prioritize_goal", targetFieldPath: "goal:Emergency fund.saved" },
+          { code: "prioritize_extra_debt_payment", targetFieldPath: "debt:Visa card.balance" },
+        ],
+      },
+    },
+    snapshotJson: buildSnapshot({
+      debtsWithUnknownTiming: [{ id: "visa-1", creditor: "Visa card", minPayment: 35 }],
+    }),
+    expectGrounded: false,
+    expectReasonIncludes: "unknown timing this cycle",
+  },
+  {
+    // Needs a debt with a real, positive APR (to clear the 0%-APR gate)
+    // AND a real in-window due date that's genuinely unfunded -- no base
+    // fixture debt has both, so this one is added directly via raw JSON
+    // rather than the buildSnapshot override helpers.
+    name: "review-fix: prioritize_extra_debt_payment on a debt whose own minimum is due this cycle but not yet funded -> FAIL",
+    userMessage: "Extra money: car payment payoff or extra Visa payment?",
+    response: {
+      answerParts: [{ type: "decision" }],
+      claims: [],
+      missing: [],
+      nextActionType: "user_decision",
+      decision: {
+        options: [
+          { code: "prioritize_goal", targetFieldPath: "goal:Emergency fund.saved" },
+          { code: "prioritize_extra_debt_payment", targetFieldPath: "debt:Car payment.balance" },
+        ],
+      },
+    },
+    snapshotJson: (() => {
+      const parsed = JSON.parse(buildSnapshot());
+      // A real, positive-APR debt due WITHIN the window, but with no
+      // entry at all in funding.items -- findFundingItem correctly
+      // reports "not found" (never "assume funded").
+      parsed.debts.push({
+        name: "Car payment",
+        balance: 2000,
+        apr: 15,
+        minimum: 200,
+        due: "2026-09-16",
+      });
+      return JSON.stringify(parsed);
+    })(),
+    expectGrounded: false,
+    expectReasonIncludes: "not yet funded by the ranked plan",
+  },
+  {
+    // The 'fact' claim type-guard gap: a snapshot value that doesn't
+    // match its declared type (a money field holding a string, not a
+    // number) must fail closed, not render unformatted raw text.
+    name: "review-fix: a 'fact' claim on a money field whose real value is a string (type mismatch) fails closed -> FAIL",
+    userMessage: "What's my Visa balance?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [{ kind: "fact", fieldPath: "debt:Visa card.balance" }],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    snapshotJson: (() => {
+      const parsed = JSON.parse(buildSnapshot());
+      parsed.debts[0].balance = "1200.555";
+      return JSON.stringify(parsed);
+    })(),
+    expectGrounded: false,
+    expectReasonIncludes: "does not match its declared type",
   },
 ];
 
@@ -2170,6 +3065,159 @@ function record(name: string, ok: boolean, detail?: string) {
   record(
     "injection-span detection + verbatim-echo check fire on the CEO's own example phrasing",
     spans.length > 0 && echoes,
+  );
+}
+
+// --- Round 9, Part F (ENGINE/whole-plan coverage): a genuinely
+//     no-shortfall/no-plan-change state must never OMIT the honest
+//     debt-timing caveat from the actual RENDERED text -- the CASES
+//     loop above only checks grounded/reason, not rendered content, so
+//     this proves the caveat text itself actually appears. This same
+//     test caught a real false-positive collision with
+//     checkEntityCountClaims during authoring (the first wording,
+//     "1 debt minimum", was itself misread as a claim that there is
+//     only 1 debt on file, when there are really 5) -- fixed in this
+//     same pass by rewording the caveat to never contain a bare
+//     "<N> debt(s)" phrase; see the caveat-construction comments in
+//     resolveStateClaim and renderActionSentence's no_action_needed
+//     case. ---
+{
+  const snapshotJson = buildSnapshot({
+    debtsWithUnknownTiming: [{ id: "d1", creditor: "Visa card", minPayment: 35 }],
+  });
+  const stateVerdict = checkGrounding(
+    {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [{ kind: "state", stateCode: "no_shortfall" }],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    { snapshotJson, currentUserMessage: "is my plan covered?", injectedSpans: [] },
+  );
+  const stateCaveatPresent =
+    stateVerdict.grounded === true &&
+    /no known due date/i.test(stateVerdict.renderedAnswer ?? "") &&
+    !/\b1 debt\b/i.test(stateVerdict.renderedAnswer ?? "");
+  record(
+    "whole-plan coverage: no_shortfall's rendered text carries the debt-timing caveat, and never as a false '<N> debt(s) on file' count",
+    stateCaveatPresent,
+    `rendered=${JSON.stringify(stateVerdict.renderedAnswer)}`,
+  );
+
+  const actionVerdict = checkGrounding(
+    {
+      answerParts: [{ type: "action" }],
+      claims: [],
+      missing: [],
+      nextActionType: "concrete_action",
+      action: { code: "no_action_needed" },
+    },
+    { snapshotJson, currentUserMessage: "am I okay?", injectedSpans: [] },
+  );
+  const actionCaveatPresent =
+    actionVerdict.grounded === true &&
+    /no known due date/i.test(actionVerdict.renderedAnswer ?? "") &&
+    !/\b1 debt\b/i.test(actionVerdict.renderedAnswer ?? "");
+  record(
+    "whole-plan coverage: no_action_needed's rendered text carries the debt-timing caveat, and never as a false '<N> debt(s) on file' count",
+    actionCaveatPresent,
+    `rendered=${JSON.stringify(actionVerdict.renderedAnswer)}`,
+  );
+}
+
+// --- Round-9 review-fix: claimAsSentence must never mutate a real
+//     entity name's own casing. Proven with actual rendered-content
+//     inspection, not just grounded === true. ---
+{
+  const parsed = JSON.parse(buildSnapshot());
+  parsed.debts.push({ name: "eBay card", balance: 300, apr: 19.99, minimum: 25, due: null });
+  const snapshotJson = JSON.stringify(parsed);
+  const verdict = checkGrounding(
+    {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [{ kind: "fact", fieldPath: "debt:eBay card.balance" }],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    { snapshotJson, currentUserMessage: "what's my eBay card balance?", injectedSpans: [] },
+  );
+  const preservesCasing =
+    verdict.grounded === true && (verdict.renderedAnswer ?? "").includes("eBay card");
+  const neverCorrupts = !(verdict.renderedAnswer ?? "").includes("EBay card");
+  record(
+    "review-fix: claimAsSentence preserves a real entity name's own casing verbatim ('eBay card', never 'EBay card')",
+    preservesCasing && neverCorrupts,
+    `rendered=${JSON.stringify(verdict.renderedAnswer)}`,
+  );
+}
+
+// --- Round-9 review-fix: the debt-timing caveat must still render even
+//     when funding.debtsWithUnknownTiming contains entries that don't
+//     match the strictly-typed shape -- the raw array length drives the
+//     caveat now, not the filtered count. ---
+{
+  const parsed = JSON.parse(buildSnapshot());
+  // Deliberately malformed: creditor is a number, minPayment is a
+  // string -- would have been silently filtered to [] by the old,
+  // strictly-typed debtsWithUnknownTiming() before this fix.
+  parsed.snapshot.funding.debtsWithUnknownTiming = [
+    { id: "d1", creditor: 12345, minPayment: "35" },
+  ];
+  const snapshotJson = JSON.stringify(parsed);
+  const verdict = checkGrounding(
+    {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [{ kind: "state", stateCode: "no_shortfall" }],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    { snapshotJson, currentUserMessage: "is my plan covered?", injectedSpans: [] },
+  );
+  const caveatSurvives =
+    verdict.grounded === true && /no known due date/i.test(verdict.renderedAnswer ?? "");
+  record(
+    "review-fix: the debt-timing caveat still renders when the underlying array's entries are malformed -- raw count, not the strictly-typed filtered count, drives it",
+    caveatSurvives,
+    `rendered=${JSON.stringify(verdict.renderedAnswer)}`,
+  );
+}
+
+// --- Round-9 review-fix: validateDecision's discretionaryRoom check
+//     must reject a non-finite (Infinity-via-JSON-overflow) available
+//     figure -- JSON.stringify(Infinity) itself only ever emits "null",
+//     so this is built via a raw string replace to reproduce the exact
+//     numeric-literal-overflow shape JSON.parse legitimately produces
+//     from a value like 1e400 in real (e.g. attacker-influenced) JSON
+//     text. ---
+{
+  const base = buildSnapshot({ discretionaryRoom: 150 });
+  const overflowed = base.replace(/"available":\d+(\.\d+)?/, '"available":1e400');
+  if (overflowed === base) {
+    throw new Error("sanity check failed: the 'available' replace pattern did not match");
+  }
+  const verdict = checkGrounding(
+    {
+      answerParts: [{ type: "decision" }],
+      claims: [],
+      missing: [],
+      nextActionType: "user_decision",
+      decision: {
+        options: [
+          { code: "prioritize_goal", targetFieldPath: "goal:Emergency fund.saved" },
+          { code: "prioritize_extra_debt_payment", targetFieldPath: "debt:Visa card.balance" },
+        ],
+      },
+    },
+    {
+      snapshotJson: overflowed,
+      currentUserMessage: "extra money: emergency fund or Visa?",
+      injectedSpans: [],
+    },
+  );
+  record(
+    "review-fix: a JSON numeric-literal overflow (available: 1e400 -> Infinity on parse) never proves real discretionary room -> FAIL",
+    verdict.grounded === false,
+    `verdict=${JSON.stringify(verdict)}`,
   );
 }
 

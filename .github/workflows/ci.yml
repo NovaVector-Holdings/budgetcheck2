@@ -1,0 +1,33 @@
+name: CI
+
+# CEO directive, "PR #10 CONSOLIDATED TRUST CLOSURE" Part G: wire the
+# repo's deterministic grounding validation into CI using only existing,
+# free infrastructure. This repo has no CI configured today -- this is
+# the first workflow file added. GitHub Actions' free tier for a public
+# or private repo under a personal/org free plan is the "existing/free
+# infrastructure" this satisfies; nothing paid is introduced.
+#
+# NOTE FOR THE RETURN PACKAGE: merging this file makes it take effect
+# immediately -- the very next push or pull_request event on this repo
+# will actually run these jobs using real (if free-tier) GitHub Actions
+# minutes. This is a live operational change, not just a yaml file.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run lint
+      - run: npm run validate:grounding
+      - run: npm run validate:decision-engine

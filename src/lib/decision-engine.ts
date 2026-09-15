@@ -13,6 +13,21 @@
 //
 // It never guesses. Any input that is missing is named, and the result is
 // marked incomplete rather than filled in with an average.
+//
+// CEO directive, "PR #10 CONSOLIDATED TRUST CLOSURE" part B: debt
+// minimums used to enter buildFundingPlan's ranked items unconditionally
+// (filtered only by minPayment > 0) while bills required a real due
+// date inside the window -- an asymmetry that let an obligation with
+// genuinely UNKNOWN timing (every debt's dueDate is null today; there is
+// no persistent due-date column on the debts table at all) drive
+// shortfall/no-shortfall as though it were verified as due this cycle.
+// Fixed: a debt minimum now requires the same real-due-date-in-window
+// proof as a bill before it enters this cycle's plan. Debts with a real
+// minimum but no known due date are excluded (never silently assumed
+// due, and never silently assumed NOT due either) and surfaced
+// separately via FundingPlan.debtsWithUnknownTiming, so a "fully
+// covered"/"no shortfall" claim built on top of this can be qualified
+// honestly rather than implying timing was evaluated when it wasn't.
 
 export type Cadence = "weekly" | "biweekly" | "semimonthly" | "monthly" | "irregular";
 
@@ -120,10 +135,18 @@ export const day = (iso: string) => {
 };
 
 export const formatDay = (iso: string) =>
-  new Date(day(iso)).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
+  new Date(day(iso)).toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 
 export const formatShort = (iso: string) =>
-  new Date(day(iso)).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  new Date(day(iso)).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 
 export const addDays = (iso: string, n: number) =>
   new Date(day(iso) + n * 86400000).toISOString().slice(0, 10);
@@ -131,11 +154,50 @@ export const addDays = (iso: string, n: number) =>
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
+// CEO directive, "PR #10 CONSOLIDATED TRUST CLOSURE" round-9 adversarial
+// review: a due date is only "usable" evidence if it's a real,
+// calendar-valid ISO yyyy-mm-dd string that round-trips exactly back to
+// itself. Without this, a malformed-but-non-null value (empty string,
+// whitespace, non-ISO garbage, an ISO datetime WITH a time-of-day/
+// offset component -- the actual shape a timestamptz column returns)
+// fell through BOTH the debt-timing-unknown bucket and the in-window
+// check and vanished from the plan with zero trace -- worse than the
+// original bug this round fixed, since even that at least counted the
+// obligation. Separately, a shape-valid but calendar-invalid date like
+// "2026-13-45" was silently rolled over by Date.UTC into an unrelated,
+// genuinely different valid date instead of being rejected. This
+// predicate is applied symmetrically to BOTH bills and debts so neither
+// side of the fix this round made regains a silent-disappearance gap.
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const hasUsableDueDate = (iso: string | null | undefined): iso is string => {
+  if (iso == null || !ISO_DATE_RE.test(iso)) return false;
+  const ms = day(iso);
+  if (!Number.isFinite(ms)) return false;
+  return new Date(ms).toISOString().slice(0, 10) === iso;
+};
+
+// A real, current-cycle minimum payment must be a genuine, finite,
+// positive number -- Infinity satisfies `> 0` in JS but is not a real
+// dollar amount and poisons totalRequested/shortfall arithmetic into
+// "$∞ short" if admitted.
+const isFinitePositive = (n: unknown): boolean => {
+  const v = Number(n ?? 0);
+  return Number.isFinite(v) && v > 0;
+};
+
 /** Projects the next deposit date from a cadence when the person gave us one. */
 export function projectNextDeposit(cycle: PayCycle, todayIso: string): string | null {
-  if (cycle.nextDepositDate && day(cycle.nextDepositDate) >= day(todayIso)) return cycle.nextDepositDate;
+  if (cycle.nextDepositDate && day(cycle.nextDepositDate) >= day(todayIso))
+    return cycle.nextDepositDate;
   if (!cycle.lastDepositDate || !cycle.cadence || cycle.cadence === "irregular") return null;
-  const step = cycle.cadence === "weekly" ? 7 : cycle.cadence === "biweekly" ? 14 : cycle.cadence === "semimonthly" ? 15 : 30;
+  const step =
+    cycle.cadence === "weekly"
+      ? 7
+      : cycle.cadence === "biweekly"
+        ? 14
+        : cycle.cadence === "semimonthly"
+          ? 15
+          : 30;
   let d = cycle.lastDepositDate;
   for (let i = 0; i < 120 && day(d) < day(todayIso); i++) d = addDays(d, step);
   return d;
@@ -184,9 +246,15 @@ export function projectMinBalance(input: EngineInput, window: Window): BalancePr
   const inflows = account.pendingInflows.filter((f) => inWindow(f.date));
   const outflows = account.pendingOutflows.filter((f) => inWindow(f.date));
 
-  const certainInflows = round2(inflows.filter((f) => f.certain).reduce((s, f) => s + Math.abs(f.amount), 0));
-  const certainOutflows = round2(outflows.filter((f) => f.certain).reduce((s, f) => s + Math.abs(f.amount), 0));
-  const uncertainOutflows = round2(outflows.filter((f) => !f.certain).reduce((s, f) => s + Math.abs(f.amount), 0));
+  const certainInflows = round2(
+    inflows.filter((f) => f.certain).reduce((s, f) => s + Math.abs(f.amount), 0),
+  );
+  const certainOutflows = round2(
+    outflows.filter((f) => f.certain).reduce((s, f) => s + Math.abs(f.amount), 0),
+  );
+  const uncertainOutflows = round2(
+    outflows.filter((f) => !f.certain).reduce((s, f) => s + Math.abs(f.amount), 0),
+  );
 
   // A cap is a commitment, so it is spent in the projection. With no cap set,
   // nothing is assumed — the observed average is never substituted in.
@@ -195,8 +263,18 @@ export function projectMinBalance(input: EngineInput, window: Window): BalancePr
     discretionary.cap != null ? round2((discretionary.cap / 30) * days) : 0;
 
   const events = [
-    ...inflows.map((f) => ({ date: f.date, desc: f.desc, delta: Math.abs(f.amount), certain: f.certain })),
-    ...outflows.map((f) => ({ date: f.date, desc: f.desc, delta: -Math.abs(f.amount), certain: f.certain })),
+    ...inflows.map((f) => ({
+      date: f.date,
+      desc: f.desc,
+      delta: Math.abs(f.amount),
+      certain: f.certain,
+    })),
+    ...outflows.map((f) => ({
+      date: f.date,
+      desc: f.desc,
+      delta: -Math.abs(f.amount),
+      certain: f.certain,
+    })),
   ].sort((a, b) => a.date.localeCompare(b.date));
 
   let running = startingBalance;
@@ -208,10 +286,13 @@ export function projectMinBalance(input: EngineInput, window: Window): BalancePr
     });
 
   const lowPoint = ledger.length
-    ? ledger.reduce((lo, e) => (e.balance < lo.balance ? { date: e.date, balance: e.balance } : lo), {
-        date: ledger[0].date,
-        balance: ledger[0].balance,
-      })
+    ? ledger.reduce(
+        (lo, e) => (e.balance < lo.balance ? { date: e.date, balance: e.balance } : lo),
+        {
+          date: ledger[0].date,
+          balance: ledger[0].balance,
+        },
+      )
     : null;
 
   const projectedMinBalance = round2(
@@ -241,9 +322,17 @@ export const FUNDING_TIERS: { tier: number; label: string; blurb: string }[] = [
   { tier: 2, label: "Safety-critical", blurb: "Things that stop you earning if they break." },
   { tier: 3, label: "Cascading cost", blurb: "Small now, much larger later if it's missed." },
   { tier: 4, label: "Debt minimums", blurb: "Highest interest rate first inside this group." },
-  { tier: 5, label: "Essential living", blurb: "Food and getting around, sized to this pay cycle." },
+  {
+    tier: 5,
+    label: "Essential living",
+    blurb: "Food and getting around, sized to this pay cycle.",
+  },
   { tier: 6, label: "Everyday spending", blurb: "Capped, not open-ended." },
-  { tier: 7, label: "Extra payoff or saving", blurb: "Only from genuine surplus after everything above." },
+  {
+    tier: 7,
+    label: "Extra payoff or saving",
+    blurb: "Only from genuine surplus after everything above.",
+  },
 ];
 
 const CATEGORY_TIER: Record<string, number> = {
@@ -261,6 +350,17 @@ const CATEGORY_TIER: Record<string, number> = {
 };
 
 export interface RankedItem {
+  /** Round-9 adversarial review: a bill and a debt minimum can end up
+   *  with the identical `label` string (a bill named to collide with
+   *  the "<creditor> minimum" convention, or simply by coincidence).
+   *  grounding.ts's item-lookup helpers now require this to match too,
+   *  never label text alone, so one entity's funded/shortfall status
+   *  can no longer be misattributed to a different, same-labeled one.
+   *  "named"/"cap" are the two synthetic line items below (a person's
+   *  named-in-conversation obligation, and the everyday-spending cap) --
+   *  neither is addressable via a bill:/debt: fieldPath, so grounding.ts
+   *  never looks them up by kind, but every RankedItem carries one. */
+  kind: "bill" | "debt" | "named" | "cap";
   id: string;
   label: string;
   amount: number;
@@ -281,6 +381,14 @@ export interface FundingPlan {
   totalRequested: number;
   shortfall: number;
   takeaway: string;
+  /** Debts with a real minimum payment but NO known due date -- excluded
+   *  from this cycle's ranked plan on purpose, because their timing was
+   *  never verified, not because they're actually due later. Unknown
+   *  timing is never treated as "not due this cycle" for shortfall
+   *  purposes either -- it's simply not evaluated at all, and this
+   *  field is how that stays visible rather than silently disappearing
+   *  into an unqualified "no shortfall". See buildFundingPlan below. */
+  debtsWithUnknownTiming: { id: string; creditor: string; minPayment: number }[];
 }
 
 /**
@@ -295,10 +403,13 @@ export function buildFundingPlan(input: EngineInput, window: Window): FundingPla
 
   const items: RankedItem[] = [];
 
-  for (const b of obligations.bills.filter((b) => inWindow(b.dueDate))) {
+  for (const b of obligations.bills.filter(
+    (b) => hasUsableDueDate(b.dueDate) && inWindow(b.dueDate),
+  )) {
     const ov = overrideFor("expense", b.id);
     const baseTier = CATEGORY_TIER[b.category] ?? 5;
     items.push({
+      kind: "bill",
       id: `bill:${b.id}`,
       label: b.name,
       amount: round2(b.amount),
@@ -311,13 +422,28 @@ export function buildFundingPlan(input: EngineInput, window: Window): FundingPla
     });
   }
 
-  // Debt minimums sit in tier 4, ordered by APR descending inside the tier.
+  // Debt minimums sit in tier 4, ordered by APR descending inside the
+  // tier -- but ONLY when a real due date puts them in this window,
+  // exactly like bills above. Unknown timing (dueDate === null, true
+  // for every debt today -- there is no persistent due-date field on
+  // the debts table at all) must never be silently treated as "due this
+  // cycle": that would let an unverified obligation drive shortfall/
+  // no-shortfall for a debt BudgetChek genuinely cannot place in this
+  // window without guessing. A real due date that's simply outside the
+  // window is a different, unproblematic case -- correctly excluded
+  // either way, but not because it was unknown.
+  const debtsWithUnknownTiming = obligations.debts
+    .filter((d) => isFinitePositive(d.minPayment) && !hasUsableDueDate(d.dueDate))
+    .map((d) => ({ id: d.id, creditor: d.creditor, minPayment: round2(Number(d.minPayment)) }));
   const mins = obligations.debts
-    .filter((d) => Number(d.minPayment ?? 0) > 0)
+    .filter(
+      (d) => isFinitePositive(d.minPayment) && hasUsableDueDate(d.dueDate) && inWindow(d.dueDate),
+    )
     .sort((a, b) => Number(b.apr ?? 0) - Number(a.apr ?? 0));
   for (const d of mins) {
     const ov = overrideFor("debt", d.id);
     items.push({
+      kind: "debt",
       id: `debt:${d.id}`,
       label: `${d.creditor} minimum`,
       amount: round2(Number(d.minPayment)),
@@ -333,6 +459,7 @@ export function buildFundingPlan(input: EngineInput, window: Window): FundingPla
   // Things the person named in conversation but hasn't saved as a line item.
   for (const c of namedConstraints) {
     items.push({
+      kind: "named",
       id: `named:${c.label}`,
       label: c.label,
       amount: round2(c.amount),
@@ -348,6 +475,7 @@ export function buildFundingPlan(input: EngineInput, window: Window): FundingPla
   if (discretionary.cap != null && discretionary.cap > 0) {
     const days = Math.max(1, Math.round((day(window.end) - day(window.start)) / 86400000) + 1);
     items.push({
+      kind: "cap",
       id: "cap:everyday",
       label: "Everyday spending, at your cap",
       amount: round2((discretionary.cap / 30) * days),
@@ -360,11 +488,23 @@ export function buildFundingPlan(input: EngineInput, window: Window): FundingPla
     });
   }
 
-  items.sort((a, b) => a.tier - b.tier || (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999") || b.amount - a.amount);
+  items.sort(
+    (a, b) =>
+      a.tier - b.tier ||
+      (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999") ||
+      b.amount - a.amount,
+  );
 
-  const reservedHeld = account.reservedFunds.reduce((s, r) => s + Math.max(0, r.amount - r.tapped), 0);
-  const inflows = account.pendingInflows.filter((f) => f.certain && inWindow(f.date)).reduce((s, f) => s + Math.abs(f.amount), 0);
-  const available = round2(Math.max(0, account.currentBalance - reservedHeld - safeBuffer) + inflows);
+  const reservedHeld = account.reservedFunds.reduce(
+    (s, r) => s + Math.max(0, r.amount - r.tapped),
+    0,
+  );
+  const inflows = account.pendingInflows
+    .filter((f) => f.certain && inWindow(f.date))
+    .reduce((s, f) => s + Math.abs(f.amount), 0);
+  const available = round2(
+    Math.max(0, account.currentBalance - reservedHeld - safeBuffer) + inflows,
+  );
 
   let pool = available;
   let cutoffIndex = -1;
@@ -390,7 +530,15 @@ export function buildFundingPlan(input: EngineInput, window: Window): FundingPla
     takeaway = `Your money covers everything down to ${first.label}, then runs out — ${money(shortfall)} short across ${items.length - cutoffIndex} item${items.length - cutoffIndex === 1 ? "" : "s"}. Start with the one at the cutoff line, not the whole gap.`;
   }
 
-  return { available, items, cutoffIndex, totalRequested, shortfall, takeaway };
+  return {
+    available,
+    items,
+    cutoffIndex,
+    totalRequested,
+    shortfall,
+    takeaway,
+    debtsWithUnknownTiming,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -413,7 +561,11 @@ export interface DebtDecision {
 
 export const HIGH_APR = 15;
 
-export function evaluateDebt(input: EngineInput, debtId: string, window: Window): DebtDecision | null {
+export function evaluateDebt(
+  input: EngineInput,
+  debtId: string,
+  window: Window,
+): DebtDecision | null {
   const debt = input.obligations.debts.find((d) => d.id === debtId);
   if (!debt) return null;
 
@@ -424,7 +576,8 @@ export function evaluateDebt(input: EngineInput, debtId: string, window: Window)
   const safe = input.safeBuffer;
   const bufferAfterFull = round2(surplus - Number(debt.balance));
 
-  const constrainedBy = namedTotal > 0 ? input.namedConstraints.map((c) => c.label).join(", ") : null;
+  const constrainedBy =
+    namedTotal > 0 ? input.namedConstraints.map((c) => c.label).join(", ") : null;
 
   if (plan.shortfall > 0) {
     return {
@@ -508,7 +661,10 @@ export interface RebuildItem {
  * Tapping a reserved fund immediately creates a top-priority rebuild line for
  * the next deposit — the same tier as housing, not "if there's extra".
  */
-export function tapReserved(fund: ReservedFund, amount: number): { fund: ReservedFund; rebuild: RebuildItem } {
+export function tapReserved(
+  fund: ReservedFund,
+  amount: number,
+): { fund: ReservedFund; rebuild: RebuildItem } {
   const take = round2(Math.min(amount, Math.max(0, fund.amount - fund.tapped)));
   return {
     fund: { ...fund, tapped: round2(fund.tapped + take) },
@@ -542,7 +698,7 @@ export interface CapCheck {
   observedAvg: number | null;
   cycleSpent: number | null;
   instrumentLabel: string | null;
-  instrumentLimit: number | null
+  instrumentLimit: number | null;
   /** True when the card backing the cap allows more spending than the cap. */
   structuralGap: boolean;
   sentence: string;
@@ -570,7 +726,16 @@ export function checkCap(args: {
     sentence = `${category} is inside the ${money(cap)} cap you set.`;
   }
 
-  return { category, cap, observedAvg, cycleSpent, instrumentLabel, instrumentLimit, structuralGap, sentence };
+  return {
+    category,
+    cap,
+    observedAvg,
+    cycleSpent,
+    instrumentLabel,
+    instrumentLimit,
+    structuralGap,
+    sentence,
+  };
 }
 
 export interface LeakMove {
@@ -646,11 +811,19 @@ export interface EngineSnapshot {
 export function computeSnapshot(input: EngineInput): EngineSnapshot {
   const missing: MissingInput[] = [];
   if (!input.account.currentBalance && input.account.currentBalance !== 0) {
-    missing.push({ field: "balance", label: "What's in your spending account right now", to: "/money-meeting" });
+    missing.push({
+      field: "balance",
+      label: "What's in your spending account right now",
+      to: "/money-meeting",
+    });
   }
   const next = projectNextDeposit(input.cycle, input.todayIso);
   if (!next) {
-    missing.push({ field: "next_pay_date", label: "The date of your next payday", to: "/settings" });
+    missing.push({
+      field: "next_pay_date",
+      label: "The date of your next payday",
+      to: "/settings",
+    });
   }
   if (!input.cycle.cadence) {
     missing.push({ field: "cadence", label: "How often you get paid", to: "/settings" });
