@@ -284,6 +284,109 @@ function bill(overrides: Partial<BillObligation>): BillObligation {
   );
 }
 
+// ---------------------------------------------------------------------
+// CEO / PRODUCT REVIEW, "PR #10 FINAL PRE-MERGE CLOSURE" bounded
+// correction 2: the rendered takeaway (and snapshot.headline, which is
+// just an alias of it) must never say or imply full coverage while a
+// real debt's timing is genuinely unknown. Four required cases, each
+// testing the ACTUAL rendered string, not just array/state presence.
+// ---------------------------------------------------------------------
+
+// A. All known-timing items funded + debtsWithUnknownTiming non-empty
+//    -> must NOT claim unqualified full coverage.
+{
+  const input = baseInput([debt({ dueDate: null })]); // unknown timing
+  input.account.currentBalance = 5000; // plenty to fully fund Rent
+  input.obligations.bills = [bill({})]; // Rent, due in-window, fully fundable
+  const plan = buildFundingPlan(input, WINDOW);
+  const snapshot = computeSnapshot(input);
+  const allKnownFunded = plan.cutoffIndex === -1 && plan.items.length > 0;
+  const hasUnknown = plan.debtsWithUnknownTiming.length > 0;
+  const neverClaimsFullCoverage = !/^everything due before/i.test(plan.takeaway);
+  const qualifiesKnownTimingOnly = /known timing/i.test(plan.takeaway);
+  const headlineMatches = snapshot.headline === plan.takeaway;
+  record(
+    "TAKEAWAY A: known-timing items all funded, unknown debt timing exists -> takeaway/headline must not claim unqualified full coverage",
+    allKnownFunded &&
+      hasUnknown &&
+      neverClaimsFullCoverage &&
+      qualifiesKnownTimingOnly &&
+      headlineMatches,
+    `takeaway=${JSON.stringify(plan.takeaway)} headline=${JSON.stringify(snapshot.headline)}`,
+  );
+}
+
+// B. No known-timing items in the window + unknown debt minimum exists
+//    -> must NOT imply nothing is due.
+{
+  const input = baseInput([debt({ dueDate: null })]); // unknown timing, no bills at all
+  const plan = buildFundingPlan(input, WINDOW);
+  const snapshot = computeSnapshot(input);
+  const noKnownItems = plan.items.length === 0;
+  const hasUnknown = plan.debtsWithUnknownTiming.length > 0;
+  const neverImpliesNothingDue = !/nothing you've entered is due/i.test(plan.takeaway);
+  const saysMayStillBelong = /may still belong in this period/i.test(plan.takeaway);
+  const headlineMatches = snapshot.headline === plan.takeaway;
+  record(
+    "TAKEAWAY B: no known-timing items scheduled, unknown debt minimum exists -> takeaway/headline must not imply nothing is due",
+    noKnownItems && hasUnknown && neverImpliesNothingDue && saysMayStillBelong && headlineMatches,
+    `takeaway=${JSON.stringify(plan.takeaway)} headline=${JSON.stringify(snapshot.headline)}`,
+  );
+}
+
+// C. A real known-timing shortfall exists + unknown debt timing also
+//    exists -> the real shortfall must be preserved exactly (never
+//    hidden, never adjusted for the unknown debt's amount, never a
+//    guess about when it's due), qualified with the honest caveat.
+{
+  const input = baseInput([debt({ dueDate: null, minPayment: 999 })]); // unknown timing
+  input.account.currentBalance = 500; // not enough to fund both bills below
+  input.obligations.bills = [
+    bill({}), // Rent, 900, due 2026-09-20
+    bill({ id: "b2", name: "Water bill", amount: 150, dueDate: "2026-09-16" }),
+  ];
+  const plan = buildFundingPlan(input, WINDOW);
+  const snapshot = computeSnapshot(input);
+  const realShortfall = plan.cutoffIndex !== -1 && plan.shortfall > 0;
+  const hasUnknown = plan.debtsWithUnknownTiming.length > 0;
+  // The unknown debt's $999 minimum must never enter this arithmetic.
+  const shortfallUnaffectedByUnknownDebt = plan.totalRequested === 900 + 150;
+  const shortfallStillReported = /short across/i.test(plan.takeaway);
+  const caveatPresent = /debt-minimum timing is also incomplete/i.test(plan.takeaway);
+  const headlineMatches = snapshot.headline === plan.takeaway;
+  record(
+    "TAKEAWAY C: known-timing shortfall + unknown debt timing -> real shortfall preserved verbatim, unknown-timing caveat also present, arithmetic untouched by the unknown debt",
+    realShortfall &&
+      hasUnknown &&
+      shortfallUnaffectedByUnknownDebt &&
+      shortfallStillReported &&
+      caveatPresent &&
+      headlineMatches,
+    `takeaway=${JSON.stringify(plan.takeaway)} totalRequested=${plan.totalRequested} shortfall=${plan.shortfall}`,
+  );
+}
+
+// D. All relevant debt timing known (no debtsWithUnknownTiming at all)
+//    + all items funded -> the ORIGINAL, unqualified covered wording
+//    must still PASS unchanged -- this fix must not regress the common
+//    case.
+{
+  const input = baseInput([]); // no debts at all -- nothing unknown
+  input.account.currentBalance = 5000;
+  input.obligations.bills = [bill({})];
+  const plan = buildFundingPlan(input, WINDOW);
+  const snapshot = computeSnapshot(input);
+  const noUnknown = plan.debtsWithUnknownTiming.length === 0;
+  const claimsFullCoverage = /^everything due before/i.test(plan.takeaway);
+  const noCaveatLeaked = !/debt-minimum timing/i.test(plan.takeaway);
+  const headlineMatches = snapshot.headline === plan.takeaway;
+  record(
+    "TAKEAWAY D: no unknown-timing debts at all, all items funded -> the normal unqualified covered wording still PASSES unchanged",
+    noUnknown && claimsFullCoverage && noCaveatLeaked && headlineMatches,
+    `takeaway=${JSON.stringify(plan.takeaway)} headline=${JSON.stringify(snapshot.headline)}`,
+  );
+}
+
 console.log("");
 console.log(`${pass}/${pass + fail} decision-engine proof cases passed`);
 

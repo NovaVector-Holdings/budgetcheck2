@@ -520,14 +520,38 @@ export function buildFundingPlan(input: EngineInput, window: Window): FundingPla
   const totalRequested = round2(items.reduce((s, i) => s + i.amount, 0));
   const shortfall = round2(Math.max(0, totalRequested - available));
 
+  // CEO / PRODUCT REVIEW, "PR #10 FINAL PRE-MERGE CLOSURE" (bounded
+  // correction 2): buildFundingPlan correctly excludes a debt minimum
+  // with unknown timing from `items`/the arithmetic above, and exposes
+  // it via debtsWithUnknownTiming -- but the takeaway sentence below
+  // (which computeSnapshot's headline is just an alias of) used to
+  // still say "Everything ... is covered" whenever every item that DID
+  // make it into the plan was funded, with no mention that a real
+  // debt's timing was never evaluated. That's too broad a claim:
+  // BudgetChek has only proven everything with VERIFIED timing is
+  // covered, never that an undated debt minimum falls outside this
+  // window. One semantic truth, not a caveat that only the assistant's
+  // own claims carry while this engine-level sentence still overclaims.
+  const hasUnknownTiming = debtsWithUnknownTiming.length > 0;
+  const unknownTimingNote =
+    " Debt-minimum timing is still incomplete, so this does not confirm every required payment for this paycheck window.";
+
   let takeaway: string;
   if (!items.length) {
-    takeaway = `Nothing you've entered is due between ${formatDay(window.start)} and ${formatDay(window.end)}. That means nothing you've told us about — not that nothing is coming.`;
+    takeaway = hasUnknownTiming
+      ? "No item with a known due date is currently scheduled in this paycheck window. Debt-minimum timing is incomplete, so a required minimum may still belong in this period."
+      : `Nothing you've entered is due between ${formatDay(window.start)} and ${formatDay(window.end)}. That means nothing you've told us about — not that nothing is coming.`;
   } else if (cutoffIndex === -1) {
-    takeaway = `Everything due before ${formatDay(window.end)} is covered, with ${money(pool)} left after your buffer.`;
+    takeaway = hasUnknownTiming
+      ? `The items with known timing due before ${formatDay(window.end)} are covered, with ${money(pool)} left after your buffer.${unknownTimingNote}`
+      : `Everything due before ${formatDay(window.end)} is covered, with ${money(pool)} left after your buffer.`;
   } else {
+    // A real, known-timing shortfall is reported exactly as before --
+    // never hidden, never adjusted for the unknown-timing debt (its
+    // amount is never added to this arithmetic; BudgetChek does not
+    // guess when it's due), only qualified with an honest caveat.
     const first = items[cutoffIndex];
-    takeaway = `Your money covers everything down to ${first.label}, then runs out — ${money(shortfall)} short across ${items.length - cutoffIndex} item${items.length - cutoffIndex === 1 ? "" : "s"}. Start with the one at the cutoff line, not the whole gap.`;
+    takeaway = `Your money covers everything down to ${first.label}, then runs out — ${money(shortfall)} short across ${items.length - cutoffIndex} item${items.length - cutoffIndex === 1 ? "" : "s"}. Start with the one at the cutoff line, not the whole gap.${hasUnknownTiming ? " Debt-minimum timing is also incomplete, so a required minimum may still belong in this period beyond what's shown here." : ""}`;
   }
 
   return {

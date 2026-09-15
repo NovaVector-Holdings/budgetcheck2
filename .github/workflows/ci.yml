@@ -11,6 +11,16 @@ name: CI
 # immediately -- the very next push or pull_request event on this repo
 # will actually run these jobs using real (if free-tier) GitHub Actions
 # minutes. This is a live operational change, not just a yaml file.
+#
+# CEO / PRODUCT REVIEW, "PR #10 FINAL PRE-MERGE CLOSURE" (bounded
+# correction 1): the first version of this workflow used
+# `cache: npm` + `npm ci`, both of which require a committed
+# package-lock.json. This repo's .gitignore intentionally excludes
+# package-lock.json (see its own comment there) -- an existing,
+# deliberate no-lockfile policy this correction does not change or
+# silently override. `npm install --package-lock=false` installs from
+# package.json only, generates no lockfile, and leaves that policy
+# exactly as it was.
 
 on:
   pull_request:
@@ -25,8 +35,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-      - run: npm ci
+      - run: npm install --package-lock=false --no-audit --no-fund
       - run: npm run build
       - run: npm run lint
       - run: npm run validate:grounding
