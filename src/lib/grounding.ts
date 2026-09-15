@@ -19,15 +19,13 @@ import { z } from "zod";
 //    phrase, never a bare value -- entity identity travels WITH the
 //    figure, because BudgetChek writes both.
 //  - The model may not name any real entity directly in "answer" text,
-//    period (scanForRawEntityNames) -- entity identity comes only from a
-//    BudgetChek-authored rendering ({claim:N}, {action}, {decision}, a
-//    structured state phrase), never from the model's own prose.
-//  - nextActionType "concrete_action" requires the template to contain
-//    exactly one {action} placeholder, filled with a sentence BudgetChek
-//    generates FROM the validated ActionCode (renderActionSentence) --
-//    the model can supply context around it, but cannot state a
-//    different next step. Same pattern for "user_decision" and
-//    {decision} (renderDecisionSentence).
+//    period -- entity identity comes only from a BudgetChek-authored
+//    rendering, never from the model's own prose.
+//  - nextActionType "concrete_action" requires a validated ActionCode,
+//    rendered into a sentence BudgetChek generates FROM it
+//    (renderActionSentence) -- the model can supply context around it,
+//    but cannot state a different next step. Same pattern for
+//    "user_decision" (renderDecisionSentence).
 //  - A new claim kind, "state", covers qualitative facts (paid/unpaid,
 //    complete/incomplete, shortfall/no-shortfall, due present/missing,
 //    in/out of window, tapped/not-tapped) the same authoritative way --
@@ -49,29 +47,22 @@ import { z } from "zod";
 // Nothing here calls the model. It is pure, deterministic, and testable
 // on its own.
 //
-// v5 (bounded correction round) closes four residual implementation gaps
-// the CEO's review found in v4's mechanism itself -- the architecture
-// above (claim placeholders, server-authored values/state, ActionCode/
-// DecisionCode, the responsible-obligation guardrail) is unchanged:
-//  - scanForUnclaimedEntityNames allowed a real entity name in prose
-//    whenever that entity appeared ANYWHERE in the response's claims --
-//    even a claim about a totally different field of it. That still let
-//    "Rent is {claim:1}." survive when claim:0 (elsewhere in the same
-//    response) merely referenced Rent's amount while claim:1 actually
-//    resolved Water bill. Renamed scanForRawEntityNames and made
-//    unconditional: the model may never write a real entity name
-//    directly in "answer", full stop -- only BudgetChek's own
-//    placeholder substitutions may, and those happen AFTER this scan
-//    runs (see renderAnswerTemplate, which scans the template with every
-//    placeholder stripped, never the final substituted text).
+// v5 (bounded correction round) closed four residual implementation gaps
+// in v4's mechanism -- the architecture (claim placeholders, server-
+// authored values/state, ActionCode/DecisionCode, the responsible-
+// obligation guardrail) was unchanged:
+//  - the entity scan allowed a real entity name in prose whenever that
+//    entity appeared ANYWHERE in the response's claims -- even a claim
+//    about a totally different field of it. Made unconditional: the
+//    model may never write a real entity name directly in "answer", full
+//    stop -- only BudgetChek's own placeholder substitutions may.
 //  - validateMissingItem only proved a targetFieldPath resolved to
-//    something real, not that the value was actually absent -- a model
-//    could claim a real, on-file due date was "missing". Now validated
-//    per MissingCode against the real, current value, which must
-//    genuinely be null. GroundingVerdict.safeMissing carries only the
-//    items that pass this, computed unconditionally up front, so a false
-//    missing claim can never reach safeFallback() even when the response
-//    fails grounding for a completely unrelated reason.
+//    something real, not that the value was actually absent. Now
+//    validated per MissingCode against the real, current value, which
+//    must genuinely be null. GroundingVerdict.safeMissing carries only
+//    the items that pass this, computed unconditionally up front, so a
+//    false missing claim can never reach safeFallback() even when the
+//    response fails grounding for a completely unrelated reason.
 //  - review_obligation_options could target a debt's total BALANCE
 //    (never the actual current-cycle obligation, which is the minimum
 //    payment) and never required a real, in-window due date before
@@ -82,25 +73,57 @@ import { z } from "zod";
 //    0%-APR debt as a discretionary decision, silently contradicting the
 //    standing "0% balance gets the minimum only" Money Meeting rule. Now
 //    requires the referenced debt's real APR to be > 0.
-//  - {action}/{decision} placeholder PRESENCE was checked, not COUNT --
-//    two copies of the same placeholder now fails closed too.
+//  - the {action}/{decision} placeholder was checked for PRESENCE, not
+//    COUNT -- two copies of the same placeholder now failed closed too.
+// Plus two further refinements found by adversarial self-verification of
+// the four fixes above: a multi-word entity name with a short leading
+// word ("US Bank Card") could still be named by dropping that word
+// ("Bank Card") or varying internal whitespace; and any MissingCode
+// (not just missing_other) could omit targetFieldPath to skip the
+// null-check entirely.
 //
-// Two further refinements, found by adversarial self-verification of the
-// four fixes above (not separately requested, but the same properties
-// they were meant to guarantee):
-//  - scanForRawEntityNames initially only checked a multi-word name's
-//    full literal phrase plus its first word (if distinctive). A real
-//    entity with a SHORT leading word ("US Bank Card") could still be
-//    named by dropping that word ("Bank Card") or varying its internal
-//    whitespace. entityNameCandidates now also checks every multi-word
-//    SUFFIX left after dropping leading words, and tolerates any
-//    whitespace run between a name's words, not just a single space.
-//  - validateMissingItem initially let ANY MissingCode omit
-//    targetFieldPath and pass trivially. Only missing_other is
-//    genuinely generic (new information with no real entity to point
-//    at yet) -- every other code now requires a target, closing a
-//    bypass where a model could claim e.g. "an APR is missing" with no
-//    target while a real debt's APR sat on file.
+// v6 (this round) finishes what v4 started. Even with every entity name
+// and figure authored by BudgetChek, one channel remained: model-owned
+// CONNECTIVE PROSE could still assert a financial fact carrying no
+// number, no entity name, and no exact-phrase match to a defense-in-
+// depth regex -- "Your plan is fully covered." when a real shortfall
+// exists, for example. No regex list closes this; the fix is
+// architectural: "answer" (a free-text template) is GONE. The contract
+// now carries `answerParts` -- a closed, ordered list of references to
+// validated things (a claim, a missing item, the validated action, the
+// validated decision, or one of five fixed conversational "framing"
+// sentences) -- and BudgetChek renders every single one. There is no
+// field left anywhere in the contract for the model to write a raw
+// sentence into. This makes the old raw-figure-token and raw-entity-name
+// scans (which existed specifically to police that free-text field)
+// structurally unreachable, so they're removed rather than kept as dead
+// code -- not a weakening: the attack surface they defended is gone
+// entirely, a strictly stronger guarantee than scanning it. The
+// defense-in-depth scans that check the FINAL rendered text regardless
+// of its source (containsUnsupportedDirective, answerEchoesInjectedSpan,
+// checkPaidStateClaims, checkEntityCountClaims) remain, per instruction.
+// containsUnsupportedDirective/answerEchoesInjectedSpan genuinely can't
+// fire against correct output any more (nothing feeds them a matching
+// phrase). checkPaidStateClaims/checkEntityCountClaims are NOT dead code,
+// though: found by adversarial review, they key off substring/word-
+// boundary matches against every real entity's name independent of which
+// claim actually produced the text, so a real entity name that happens
+// to be a word-prefix of a DIFFERENT real entity's name (e.g. "Rent" vs.
+// "Rent extension"), or that itself reads like a count phrase (e.g. a
+// goal named "Two Goals Fund"), can trigger a false rejection of an
+// otherwise fully accurate answer -- always fail-safe (the person sees
+// the generic "I don't have enough information" fallback, never a false
+// claim), never fail-unsafe. Flagged as a known, bounded limitation
+// rather than fixed here (a real fix needs these scans to know which
+// claim rendered which span of text, not just pattern-match the final
+// string) -- see the return package.
+//
+// Also this round: review_shortfall_item now requires a debt's
+// MINIMUM (never its balance) plus real, in-window due-date evidence,
+// matching review_obligation_options exactly -- all four current-cycle
+// obligation actions (hold_for_due_item, pay_required_minimum,
+// review_shortfall_item, review_obligation_options) now share identical
+// debt-timing semantics.
 
 export type FactType = "money" | "percent" | "date" | "count" | "text" | "boolean";
 
@@ -218,15 +241,43 @@ export interface MissingItem {
   targetFieldPath?: string;
 }
 
+/** A small, closed set of BudgetChek-authored conversational sentences
+ *  for connective/meta text that carries NO financial meaning at all --
+ *  never state, coverage, timing, paid/unpaid, or a recommendation.
+ *  Deliberately a short, fixed enum, not a mechanism to mimic arbitrary
+ *  model prose: if a genuinely new situation needs a new closed code,
+ *  that is a deliberate addition to this list, never a free-text escape
+ *  hatch. See renderFramingSentence for the exact fixed wording of each. */
+export type FramingCode =
+  | "hypothetical_notice"
+  | "user_choice_acknowledgement"
+  | "external_information_unavailable"
+  | "needs_more_information"
+  | "plan_context";
+
+/** Every part of a displayed answer that can carry meaning, closed to
+ *  exactly these five shapes. There is no free-text part -- every word
+ *  the person sees is written by BudgetChek's own renderer for whichever
+ *  part type it is; the model only ever picks WHICH parts are relevant
+ *  and in what order. This is what finally closes the "connective prose
+ *  asserts an unvalidated fact" channel: there is no field left anywhere
+ *  in the contract for the model to write a raw sentence into. */
+export type AnswerPart =
+  | { type: "claim"; claimIndex: number }
+  | { type: "missing"; missingIndex: number }
+  | { type: "action" }
+  | { type: "decision" }
+  | { type: "framing"; code: FramingCode };
+
 /** The contract the model must return instead of free-form prose. Strict:
- *  every field is required, every enum is closed, no dollar/percent/date
- *  literal and no unclaimed real entity name may appear in "answer"
- *  outside the placeholders BudgetChek controls. There is no permissive
+ *  every field is required, every enum is closed. There is no permissive
  *  default anywhere in the schema that parses this shape (see
  *  AskResponseSchema below) -- a response that doesn't match exactly
  *  fails closed rather than being coerced into something that does. */
 export interface AskResponseContract {
-  answer: string;
+  /** The ordered composition of the displayed answer. See AnswerPart --
+   *  there is no free-text field anywhere else in this contract either. */
+  answerParts: AnswerPart[];
   claims: Claim[];
   missing: MissingItem[];
   nextActionType: NextActionType;
@@ -242,8 +293,12 @@ export interface GroundingVerdict {
   reason?: string;
   /** The specific literal/field/code/entity token that failed, if any. */
   offendingToken?: string;
-  /** Present only when grounded: true -- the template with every
-   *  placeholder substituted for its real, BudgetChek-authored text. */
+  /** Present only when grounded: true -- the fully composed answer, with
+   *  every answerPart rendered from its BudgetChek-authored source (a
+   *  claim's authoritative phrase, a missing item's question, the
+   *  validated action/decision sentence, or a fixed framing sentence).
+   *  There is no step anywhere that substitutes in model-authored text --
+   *  every word here was written by this module. */
   renderedAnswer?: string;
   /** Present only when grounded: true -- the resolved claims, in the
    *  wire shape the client already renders. */
@@ -426,22 +481,6 @@ function extractEntityName(fieldPath?: string): string | null {
   return m ? m[2] : null;
 }
 
-function collectAllEntityNames(payload: Record<string, unknown>): string[] {
-  const names: string[] = [];
-  for (const kind of Object.keys(ENTITY_ARRAY_KEY)) {
-    const arr = payload[ENTITY_ARRAY_KEY[kind]];
-    if (!Array.isArray(arr)) continue;
-    const nameField = ENTITY_NAME_FIELD[kind];
-    for (const e of arr) {
-      if (e && typeof e === "object") {
-        const n = (e as Record<string, unknown>)[nameField];
-        if (typeof n === "string") names.push(n);
-      }
-    }
-  }
-  return names;
-}
-
 function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
@@ -577,6 +616,17 @@ function resolveStateClaim(claim: Claim, payload: Record<string, unknown>): Clai
     }
     case "has_shortfall":
     case "no_shortfall": {
+      // funding being null (a real, reachable state -- computeSnapshot
+      // returns it when the plan isn't complete enough to compute a
+      // funding plan yet) must fail BOTH directions closed. Defaulting
+      // the missing-data case to "no shortfall" would let this claim
+      // pass as true when it was never actually verified.
+      if (!funding) {
+        return {
+          ok: false,
+          reason: `${code} requires a computed funding plan, which isn't available yet`,
+        };
+      }
       if (code === "has_shortfall") {
         if (!(shortfall > 0))
           return { ok: false, reason: "claimed a shortfall exists, but there isn't one" };
@@ -617,8 +667,18 @@ function resolveStateClaim(claim: Claim, payload: Record<string, unknown>): Clai
           reason: `${code} requires a targetFieldPath naming a real bill or debt with a real due date`,
         };
       }
+      // window being null (same real, reachable state as funding above)
+      // must fail BOTH directions closed -- defaulting the missing-data
+      // case to "not in window" would let out_of_window pass as true
+      // when the window was never actually known, let alone checked.
+      if (!window) {
+        return {
+          ok: false,
+          reason: `${code} requires a computed planning window, which isn't available yet`,
+        };
+      }
       const name = extractEntityName(claim.fieldPath)!;
-      const inWin = window ? withinWindow(resolved.value, window) : false;
+      const inWin = withinWindow(resolved.value, window);
       if (code === "in_window") {
         if (!inWin)
           return { ok: false, reason: `claimed "${name}" is due within the window, but it is not` };
@@ -752,198 +812,166 @@ function resolveClaim(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Rendering the answer template
-// ---------------------------------------------------------------------------
-
-const MONTHS =
-  "January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec";
-const MONTH_DATE_RE = new RegExp(`\\b(?:${MONTHS})\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?\\b`, "i");
-
-/** Any raw dollar, percent, or date-shaped literal once every placeholder
- *  is stripped out -- a figure the model tried to author itself. */
-function firstRawFigureToken(text: string): string | null {
-  const dollar = text.match(/\$\s?-?\d[\d,]*(?:\.\d{1,2})?/);
-  if (dollar) return dollar[0];
-  const pct = text.match(/-?\d+(?:\.\d+)?\s?%/);
-  if (pct) return pct[0];
-  const iso = text.match(/\b\d{4}-\d{2}-\d{2}\b/);
-  if (iso) return iso[0];
-  const monthDate = text.match(MONTH_DATE_RE);
-  if (monthDate) return monthDate[0];
-  return null;
-}
-
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function countOccurrences(text: string, literal: string): number {
-  return (text.match(new RegExp(escapeRegex(literal), "g")) ?? []).length;
-}
+// ---------------------------------------------------------------------------
+// Rendering answerParts -- BudgetChek composes the ENTIRE displayed
+// answer from validated, structured pieces. There is no free-text field
+// anywhere in the contract, so there is nothing left for the model to
+// write a raw figure, a raw entity name, or an unvalidated financial
+// assertion into.
+// ---------------------------------------------------------------------------
 
-/** Every regex-source phrase a model could write to unambiguously name
- *  this real entity: the full name (tolerant of ANY run of whitespace
- *  between its words -- a double space or a newline still names the
- *  same real thing, not just a single literal space), every multi-word
- *  SUFFIX left after dropping one or more leading words (so a short
- *  leading qualifier -- "US Bank Card" written as just "Bank Card" --
- *  can't slip through by omission), and the lone first word when it's
- *  distinctive enough to stand alone (>= 4 chars, e.g. "Visa" for "Visa
- *  card"). Deliberately never a single word shorter than that, and never
- *  a single word from the MIDDLE or END of a name alone ("bill", "card",
- *  "fund", "plan") -- those are ordinary financial vocabulary shared
- *  across many real entities and would make the model unable to discuss
- *  bills/cards/funds/plans generically at all. */
-function entityNameCandidates(name: string): string[] {
-  const words = name.split(/\s+/).filter(Boolean);
-  const candidates = new Set<string>();
-  candidates.add(words.map(escapeRegex).join("\\s+"));
-  for (let drop = 1; drop <= words.length - 2; drop++) {
-    candidates.add(words.slice(drop).map(escapeRegex).join("\\s+"));
+export const FRAMING_CODES = [
+  "hypothetical_notice",
+  "user_choice_acknowledgement",
+  "external_information_unavailable",
+  "needs_more_information",
+  "plan_context",
+] as const;
+
+/** BudgetChek's own fixed, closed set of conversational framing
+ *  sentences -- for connective/meta text that carries NO financial
+ *  meaning at all. */
+function renderFramingSentence(code: FramingCode): string {
+  switch (code) {
+    case "hypothetical_notice":
+      return "Just so you're clear, this is a hypothetical, not your actual plan.";
+    case "user_choice_acknowledgement":
+      return "That's your call to make -- I can show how the numbers look without treating it as my own recommendation.";
+    case "external_information_unavailable":
+      return "That's not something BudgetChek has for your plan -- there's no outside rate, average, or policy to check against here.";
+    case "needs_more_information":
+      return "I don't have enough here to answer that without guessing.";
+    case "plan_context":
+      return "Here's what that looks like based on your real numbers.";
   }
-  if (words[0].length >= 4) candidates.add(escapeRegex(words[0]));
-  return [...candidates];
 }
 
-/** Any real entity name mentioned raw anywhere in the template. The
- *  model may never write a real bill/debt/goal/account/reserved-fund
- *  name directly in "answer" -- not even when that same entity is also
- *  the subject of one of its own claims elsewhere in the response. An
- *  earlier, "unclaimed-only" version of this check had a composition
- *  hole: a response could claim bill:Rent.amount for one purpose while
- *  writing "Rent is {claim:1}." where claim:1 actually resolves a
- *  DIFFERENT entity (Water bill) -- "Rent" passed because it was claimed
- *  SOMEWHERE, just not for the fact it was sitting next to. Entity
- *  identity now comes only from a BudgetChek-authored rendering --
- *  {claim:N}, {action}, {decision}, or a structured state phrase -- all
- *  substituted AFTER this scan runs (see renderAnswerTemplate, which
- *  scans the template with every placeholder stripped, never the final
- *  substituted text). See entityNameCandidates for exactly which raw
- *  phrasings of a name are matched. */
-function scanForRawEntityNames(text: string, payload: Record<string, unknown>): string | null {
-  for (const name of collectAllEntityNames(payload)) {
-    for (const candidate of entityNameCandidates(name)) {
-      if (new RegExp(`\\b${candidate}\\b`, "i").test(text)) return name;
-    }
-  }
-  return null;
+/** Turns a resolved claim phrase (a noun phrase like "Rent's amount
+ *  ($900.00)", a state clause like "the plan is complete", or a bare
+ *  value like "$300.00") into a complete, capitalized, period-terminated
+ *  sentence for standalone display as its own answerPart. */
+function claimAsSentence(formatted: string): string {
+  const cap = formatted.charAt(0).toUpperCase() + formatted.slice(1);
+  return /[.!?]$/.test(cap) ? cap : `${cap}.`;
 }
 
-const CLAIM_PLACEHOLDER_RE = /\{claim:(\d+)\}/g;
+/** Renders a missing item as a clarifying question, from the same
+ *  closed MissingCode + optional real entity name missingPhrase already
+ *  uses for the safe fallback -- no free text here either. */
+function missingAsQuestion(item: MissingItem): string {
+  if (item.code === "missing_other") return "Can you tell me more about what's missing?";
+  return `What's ${missingPhrase(item)}?`;
+}
 
 type RenderResult =
   | { ok: true; rendered: string; resolvedFacts: UsedFact[] }
   | { ok: false; reason: string; offendingToken?: string };
 
-function renderAnswerTemplate(
+/** Renders the ordered answerParts list into the final displayed answer.
+ *  Every word comes from a BudgetChek-authored renderer keyed to a
+ *  validated, structured part -- a claim's authoritative phrase, a
+ *  missing item's question, the validated action/decision sentence, or
+ *  one of five fixed framing sentences. The model only ever picks WHICH
+ *  parts are relevant and in what order; it never supplies a word of the
+ *  rendered text itself. */
+function renderAnswerParts(
   response: AskResponseContract,
   payload: Record<string, unknown>,
   currentUserMessage: string,
 ): RenderResult {
-  const { answer: template, claims, nextActionType, action, decision } = response;
+  const { answerParts, claims, missing, nextActionType, action, decision } = response;
 
-  const withoutPlaceholders = template
-    .replace(CLAIM_PLACEHOLDER_RE, "")
-    .replace(/\{action\}/g, "")
-    .replace(/\{decision\}/g, "");
-
-  const rawFigure = firstRawFigureToken(withoutPlaceholders);
-  if (rawFigure) {
-    return {
-      ok: false,
-      reason: "answer contains a literal figure not backed by a {claim:N} placeholder",
-      offendingToken: rawFigure,
-    };
-  }
-  const rawEntity = scanForRawEntityNames(withoutPlaceholders, payload);
-  if (rawEntity) {
-    return {
-      ok: false,
-      reason: `answer names "${rawEntity}" directly in prose -- entity identity must come only from a {claim:N}, {action}, {decision}, or other BudgetChek-rendered output, never written by the model, even when that entity is also referenced by one of its claims`,
-      offendingToken: rawEntity,
-    };
+  if (!Array.isArray(answerParts) || answerParts.length === 0) {
+    return { ok: false, reason: "answerParts must contain at least one part" };
   }
 
-  const placeholderIndices = [...template.matchAll(CLAIM_PLACEHOLDER_RE)].map((m) => Number(m[1]));
-  for (const idx of placeholderIndices) {
-    if (idx < 0 || idx >= claims.length) {
-      return {
-        ok: false,
-        reason: `answer references {claim:${idx}} which doesn't exist in claims`,
-        offendingToken: `{claim:${idx}}`,
-      };
-    }
-  }
-
-  const formattedByIndex = new Map<number, string>();
+  const sentences: string[] = [];
   const resolvedFacts: UsedFact[] = [];
-  for (let i = 0; i < claims.length; i++) {
-    const claim = claims[i];
-    const res = resolveClaim(claim, payload, currentUserMessage);
-    if (!res.ok) return { ok: false, reason: res.reason, offendingToken: res.offendingToken };
-    formattedByIndex.set(i, res.formatted);
-    resolvedFacts.push({
-      label: res.formatted,
-      value: res.formatted,
-      source: claim.kind === "derived" ? "derived" : claim.kind === "state" ? "state" : "snapshot",
-    });
+  let actionParts = 0;
+  let decisionParts = 0;
+  let claimParts = 0;
+
+  for (const part of answerParts) {
+    switch (part.type) {
+      case "claim": {
+        claimParts++;
+        if (part.claimIndex < 0 || part.claimIndex >= claims.length) {
+          return {
+            ok: false,
+            reason: `answerParts references claim ${part.claimIndex} which doesn't exist in claims`,
+          };
+        }
+        const claim = claims[part.claimIndex];
+        const res = resolveClaim(claim, payload, currentUserMessage);
+        if (!res.ok) return { ok: false, reason: res.reason, offendingToken: res.offendingToken };
+        sentences.push(claimAsSentence(res.formatted));
+        resolvedFacts.push({
+          label: res.formatted,
+          value: res.formatted,
+          source:
+            claim.kind === "derived" ? "derived" : claim.kind === "state" ? "state" : "snapshot",
+        });
+        break;
+      }
+      case "missing": {
+        if (part.missingIndex < 0 || part.missingIndex >= missing.length) {
+          return {
+            ok: false,
+            reason: `answerParts references missing ${part.missingIndex} which doesn't exist in missing`,
+          };
+        }
+        const item = missing[part.missingIndex];
+        const v = validateMissingItem(item, payload);
+        if (!v.ok) return { ok: false, reason: v.reason };
+        sentences.push(missingAsQuestion(item));
+        break;
+      }
+      case "action": {
+        actionParts++;
+        if (nextActionType !== "concrete_action") {
+          return { ok: false, reason: "an action part requires nextActionType concrete_action" };
+        }
+        if (!action) return { ok: false, reason: "concrete_action requires a structured action" };
+        sentences.push(renderActionSentence(action, payload));
+        break;
+      }
+      case "decision": {
+        decisionParts++;
+        if (nextActionType !== "user_decision") {
+          return { ok: false, reason: "a decision part requires nextActionType user_decision" };
+        }
+        if (!decision) return { ok: false, reason: "user_decision requires a structured decision" };
+        sentences.push(renderDecisionSentence(decision, payload));
+        break;
+      }
+      case "framing": {
+        sentences.push(renderFramingSentence(part.code));
+        break;
+      }
+    }
   }
 
-  let rendered = template.replace(
-    CLAIM_PLACEHOLDER_RE,
-    (_full, idxStr: string) => formattedByIndex.get(Number(idxStr)) ?? "",
-  );
-
-  const actionPlaceholderCount = countOccurrences(rendered, "{action}");
-  if (nextActionType === "concrete_action") {
-    if (actionPlaceholderCount === 0) {
-      return {
-        ok: false,
-        reason: "concrete_action requires exactly one {action} placeholder in answer",
-      };
-    }
-    if (actionPlaceholderCount > 1) {
-      return {
-        ok: false,
-        reason:
-          "concrete_action requires exactly one {action} placeholder in answer, not more than one",
-      };
-    }
-    if (!action) return { ok: false, reason: "concrete_action requires a structured action" };
-    rendered = rendered.replace(/\{action\}/g, renderActionSentence(action, payload));
-  } else if (actionPlaceholderCount > 0) {
-    return {
-      ok: false,
-      reason: "{action} placeholder used without nextActionType concrete_action",
-    };
+  if (actionParts > 1) {
+    return { ok: false, reason: "answerParts may contain at most one action part" };
+  }
+  if (nextActionType === "concrete_action" && actionParts !== 1) {
+    return { ok: false, reason: "concrete_action requires exactly one action part in answerParts" };
+  }
+  if (decisionParts > 1) {
+    return { ok: false, reason: "answerParts may contain at most one decision part" };
+  }
+  if (nextActionType === "user_decision" && decisionParts !== 1) {
+    return { ok: false, reason: "user_decision requires exactly one decision part in answerParts" };
+  }
+  if (nextActionType === "lookup_value" && claimParts < 1) {
+    return { ok: false, reason: "lookup_value requires at least one claim part in answerParts" };
   }
 
-  const decisionPlaceholderCount = countOccurrences(rendered, "{decision}");
-  if (nextActionType === "user_decision") {
-    if (decisionPlaceholderCount === 0) {
-      return {
-        ok: false,
-        reason: "user_decision requires exactly one {decision} placeholder in answer",
-      };
-    }
-    if (decisionPlaceholderCount > 1) {
-      return {
-        ok: false,
-        reason:
-          "user_decision requires exactly one {decision} placeholder in answer, not more than one",
-      };
-    }
-    if (!decision) return { ok: false, reason: "user_decision requires a structured decision" };
-    rendered = rendered.replace(/\{decision\}/g, renderDecisionSentence(decision, payload));
-  } else if (decisionPlaceholderCount > 0) {
-    return {
-      ok: false,
-      reason: "{decision} placeholder used without nextActionType user_decision",
-    };
-  }
-
-  return { ok: true, rendered, resolvedFacts };
+  return { ok: true, rendered: sentences.join(" "), resolvedFacts };
 }
 
 // ---------------------------------------------------------------------------
@@ -971,12 +999,14 @@ function fail(reason: string): ActionVerdict {
  *  or at/after the real cutoff) -- not merely a real item that happens
  *  to exist while a shortfall exists elsewhere. Matches funding items by
  *  label: bills by exact name, debts by the engine's own "<name>
- *  minimum" labeling convention. A more stable id-based link on funding
- *  items would be more robust long-term (noted in the return package);
- *  this is deliberately conservative -- unmatched or ambiguous items are
- *  NOT considered affected. */
+ *  minimum" labeling convention -- a debt's current-cycle funding-plan
+ *  line item IS its minimum payment, never its balance, which is why
+ *  only "amount" (bill) and "minimum" (debt) are matched here at all; a
+ *  more stable id-based link on funding items would be more robust
+ *  long-term (noted in the return package). Deliberately conservative --
+ *  unmatched or ambiguous items are NOT considered affected. */
 function isShortfallAffectedTarget(fieldPath: string, payload: Record<string, unknown>): boolean {
-  const m = fieldPath.match(/^(bill|debt):(.+)\.(amount|balance|minimum)$/);
+  const m = fieldPath.match(/^(bill|debt):(.+)\.(amount|minimum)$/);
   if (!m) return false;
   const [, kind, name] = m;
   const snap = (payload.snapshot ?? {}) as Record<string, unknown>;
@@ -1096,8 +1126,16 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
 
     case "review_shortfall_item": {
       if (!action.targetFieldPath) return fail("review_shortfall_item requires a targetFieldPath");
-      if (!/^(bill:(.+)\.amount|debt:(.+)\.balance)$/.test(action.targetFieldPath)) {
-        return fail("review_shortfall_item target must be a real bill amount or debt balance");
+      // The current-cycle obligation for a debt is its required MINIMUM,
+      // never its total balance -- the funding plan's own line item for
+      // a debt IS its minimum payment (see isShortfallAffectedTarget's
+      // "<name> minimum" label match). No debt:<name>.balance shape.
+      const billMatch = action.targetFieldPath.match(/^bill:(.+)\.amount$/);
+      const debtMinMatch = action.targetFieldPath.match(/^debt:(.+)\.minimum$/);
+      if (!billMatch && !debtMinMatch) {
+        return fail(
+          "review_shortfall_item target must be a real bill amount, or a real debt's minimum payment -- never a debt's total balance for a current-cycle obligation",
+        );
       }
       if (!resolveFieldPath(action.targetFieldPath, payload)) {
         return fail("review_shortfall_item target does not resolve to anything real");
@@ -1108,6 +1146,22 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
       if (!isShortfallAffectedTarget(action.targetFieldPath, payload)) {
         return fail(
           "review_shortfall_item target is not one of the items actually affected by the current shortfall",
+        );
+      }
+      // Same debt-timing evidence requirement as pay_required_minimum /
+      // hold_for_due_item / review_obligation_options -- all four
+      // current-cycle obligation actions must agree on this.
+      const name = billMatch ? billMatch[1] : debtMinMatch![1];
+      const kind = billMatch ? "bill" : "debt";
+      const due = resolveFieldPath(`${kind}:${name}.due`, payload);
+      if (!due || typeof due.value !== "string") {
+        return fail(
+          "review_shortfall_item requires a real due date on file -- BudgetChek does not guess timing; use add_missing_due_date or ask instead",
+        );
+      }
+      if (!window || !withinWindow(due.value, window)) {
+        return fail(
+          "review_shortfall_item target's due date is not within the current planning window",
         );
       }
       return { ok: true };
@@ -1239,8 +1293,8 @@ function renderActionSentence(action: StructuredAction, payload: Record<string, 
       return `Pay the required minimum of ${moneyOr(action.targetFieldPath ?? "", "the minimum")} on ${name}, due ${dateOr(`debt:${name}.due`, "soon")}.`;
     }
     case "review_shortfall_item": {
-      const m = action.targetFieldPath?.match(/^(?:bill|debt):(.+)\.(?:amount|balance)$/);
-      const name = m?.[1] ?? "this item";
+      const m = action.targetFieldPath?.match(/^(?:bill:(.+)\.amount|debt:(.+)\.minimum)$/);
+      const name = m?.[1] ?? m?.[2] ?? "this item";
       return `This cycle's plan doesn't fully cover ${name} -- review it.`;
     }
     case "review_obligation_options": {
@@ -1525,10 +1579,12 @@ export function answerEchoesInjectedSpan(answer: string, spans: string[]): boole
 }
 
 /** Defense-in-depth (per instruction, not the primary mechanism -- the
- *  closed ActionCode/DecisionCode vocabularies and the entity-authority
- *  scan above are). Catches the responsible-obligation guardrail's
- *  target intent slipping into free prose that never invokes the
- *  structured action/decision machinery at all. */
+ *  closed ActionCode/DecisionCode vocabularies and the closed
+ *  answerParts composition are). Catches the responsible-obligation
+ *  guardrail's target intent slipping into the final rendered text via a
+ *  bug in one of the renderers above -- under a correct implementation
+ *  there is no channel for the model's own words to reach this text at
+ *  all, so this should never actually fire in practice either. */
 const UNSUPPORTED_DIRECTIVE_PATTERNS = [
   /clos(e|ing)\s+(all|every)\s+(your\s+)?accounts?/i,
   /empty(ing)?\s+(your\s+|the\s+)?(savings|reserved|emergency fund)/i,
@@ -1561,8 +1617,8 @@ export function containsUnsupportedDirective(answer: string): string | null {
 
 // ---------------------------------------------------------------------------
 // Qualitative / state-claim grounding -- round 4's free-text scans, kept
-// running as defense-in-depth alongside this round's structured "state"
-// claim kind (see resolveStateClaim above), per instruction to keep this
+// running as defense-in-depth alongside the structured "state" claim
+// kind (see resolveStateClaim above), per instruction to keep this
 // coverage rather than remove it.
 // ---------------------------------------------------------------------------
 
@@ -1659,6 +1715,25 @@ export function checkGrounding(
   // safeMissing's doc comment on GroundingVerdict.
   const safeMissing = response.missing.filter((item) => validateMissingItem(item, payload).ok);
 
+  // insufficient_data: BudgetChek's own fixed safe-fallback wording only
+  // -- never model-authored content, regardless of what answerParts
+  // contains, per instruction. The missing-item validation loop still
+  // runs (for accurate server-side diagnostics when a model lies about
+  // missing data), but the DISPLAYED text is always built from
+  // safeMissing either way, so nothing false can ever reach it.
+  if (response.nextActionType === "insufficient_data") {
+    for (const item of response.missing) {
+      const v = validateMissingItem(item, payload);
+      if (!v.ok) return { grounded: false, reason: v.reason, safeMissing };
+    }
+    return {
+      grounded: true,
+      renderedAnswer: safeFallback(safeMissing),
+      resolvedFacts: [],
+      safeMissing,
+    };
+  }
+
   // Defense #1: the recommended action/decision itself must be real,
   // deterministic-state-validated -- checked BEFORE rendering, so the
   // authoritative sentence generated below is only ever generated for
@@ -1700,12 +1775,11 @@ export function checkGrounding(
     if (!v.ok) return { grounded: false, reason: v.reason, safeMissing };
   }
 
-  // Defense #2: resolve the template directly from real data -- entity
-  // identity and value both authored by BudgetChek, and the model's own
-  // validated next step rendered from ActionCode/DecisionCode, not from
-  // free prose. No reverse-validation step: there is nothing left to
-  // reverse-validate, because none of this text came from the model.
-  const rendered = renderAnswerTemplate(response, payload, ctx.currentUserMessage);
+  // Defense #2: compose the answer entirely from BudgetChek-authored
+  // parts. There is no free-text field anywhere in the contract, so
+  // there is nothing left to reverse-validate -- none of this text was
+  // ever written by the model.
+  const rendered = renderAnswerParts(response, payload, ctx.currentUserMessage);
   if (!rendered.ok) {
     return {
       grounded: false,
@@ -1827,8 +1901,16 @@ const MissingItemSchema = z.object({
   targetFieldPath: z.string().min(1).optional(),
 });
 
+const AnswerPartSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("claim"), claimIndex: z.number().int().min(0) }),
+  z.object({ type: z.literal("missing"), missingIndex: z.number().int().min(0) }),
+  z.object({ type: z.literal("action") }),
+  z.object({ type: z.literal("decision") }),
+  z.object({ type: z.literal("framing"), code: z.enum(FRAMING_CODES) }),
+]);
+
 const AskResponseSchema = z.object({
-  answer: z.string().min(1),
+  answerParts: z.array(AnswerPartSchema).min(1),
   claims: z.array(ClaimSchema),
   missing: z.array(MissingItemSchema),
   nextActionType: z.enum([
@@ -1844,11 +1926,17 @@ const AskResponseSchema = z.object({
 
 /** Parses the model's raw text into the strict contract, or null if it
  *  doesn't conform -- including every cross-field rule: "concrete_action"
- *  requires a structured action, "user_decision" requires a structured
- *  decision with >= 2 options, "fact"/"derived" claims require a
- *  fieldPath, "user_input" claims require a userOperand, "state" claims
- *  require a stateCode. Tolerant of surrounding prose/markdown fences
- *  around the JSON object, never tolerant of the shape once found. */
+ *  requires a structured action AND exactly one action part in
+ *  answerParts (never more, never for another nextActionType);
+ *  "user_decision" the same for a structured decision (>= 2 options) and
+ *  exactly one decision part; "lookup_value" requires at least one claim
+ *  part; "fact"/"derived" claims require a fieldPath; "user_input"
+ *  claims require a userOperand; "state" claims require a stateCode;
+ *  every claim/missing index an answerPart references must actually
+ *  exist. Tolerant of surrounding prose/markdown fences around the JSON
+ *  object, never tolerant of the shape once found. Note: an "answer"
+ *  string field (the old, removed free-text contract) is never read
+ *  here even if present in the raw JSON -- only answerParts is. */
 export function parseContract(raw: string): AskResponseContract | null {
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) return null;
@@ -1856,18 +1944,31 @@ export function parseContract(raw: string): AskResponseContract | null {
     const parsed = JSON.parse(match[0]);
     const result = AskResponseSchema.safeParse(parsed);
     if (!result.success) return null;
-    if (result.data.nextActionType === "concrete_action" && !result.data.action) return null;
-    if (
-      result.data.nextActionType === "user_decision" &&
-      (!result.data.decision || result.data.decision.options.length < 2)
-    ) {
+    const { answerParts, claims, missing, nextActionType, action, decision } = result.data;
+
+    if (nextActionType === "concrete_action" && !action) return null;
+    if (nextActionType === "user_decision" && (!decision || decision.options.length < 2)) {
       return null;
     }
-    for (const claim of result.data.claims) {
+
+    for (const claim of claims) {
       if ((claim.kind === "fact" || claim.kind === "derived") && !claim.fieldPath) return null;
       if (claim.kind === "user_input" && !claim.userOperand) return null;
       if (claim.kind === "state" && !claim.stateCode) return null;
     }
+
+    const actionPartCount = answerParts.filter((p) => p.type === "action").length;
+    const decisionPartCount = answerParts.filter((p) => p.type === "decision").length;
+    const claimPartCount = answerParts.filter((p) => p.type === "claim").length;
+    if (actionPartCount !== (nextActionType === "concrete_action" ? 1 : 0)) return null;
+    if (decisionPartCount !== (nextActionType === "user_decision" ? 1 : 0)) return null;
+    if (nextActionType === "lookup_value" && claimPartCount < 1) return null;
+
+    for (const part of answerParts) {
+      if (part.type === "claim" && part.claimIndex >= claims.length) return null;
+      if (part.type === "missing" && part.missingIndex >= missing.length) return null;
+    }
+
     return result.data;
   } catch {
     return null;
