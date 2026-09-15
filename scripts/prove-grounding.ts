@@ -261,12 +261,15 @@ const CASES: Case[] = [
     expectGrounded: true,
   },
   {
-    name: "legitimate $300 hypothetical toward the Visa card -- derived + user_input + hypothetical_notice framing",
+    // Also round 8's Test D. There is no standalone user_input claim
+    // any more (removed this round) -- the derived claim's own render
+    // names the user's $300 explicitly (derivedHypotheticalPhrase), so
+    // nothing separate is needed.
+    name: "D: legitimate $300 hypothetical toward the Visa card -- derived + hypothetical_notice framing -> PASS",
     userMessage: "What if I put an extra $300 toward the Visa card?",
     response: {
       answerParts: [
         { type: "framing", code: "hypothetical_notice" },
-        { type: "claim", claimIndex: 2 },
         { type: "claim", claimIndex: 0 },
         { type: "claim", claimIndex: 1 },
       ],
@@ -278,7 +281,6 @@ const CASES: Case[] = [
           operation: "subtract",
           userOperand: "$300",
         },
-        { kind: "user_input", userOperand: "$300" },
       ],
       missing: [],
       nextActionType: "lookup_value",
@@ -286,19 +288,165 @@ const CASES: Case[] = [
     expectGrounded: true,
   },
   {
-    name: "a user_input claim citing a figure the person never actually typed -> FAIL",
+    name: "a derived claim's userOperand citing a figure the person never actually typed -> FAIL",
     userMessage: "What if I put an extra $50 toward the Visa card?",
     response: {
-      answerParts: [{ type: "claim", claimIndex: 0 }, { type: "decision" }],
-      claims: [{ kind: "user_input", userOperand: "$500" }],
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "$500",
+        },
+      ],
       missing: [],
-      nextActionType: "user_decision",
-      decision: {
-        options: [{ code: "compare_real_priorities" }, { code: "preserve_additional_buffer" }],
-      },
+      nextActionType: "lookup_value",
     },
     expectGrounded: false,
-    expectReasonIncludes: "wasn't literally typed",
+    expectReasonIncludes: "not expressed as an unambiguous dollar amount",
+  },
+
+  // ===================================================================
+  // Round 8: the user-supplied-number path. "user_input" is removed as
+  // a Claim kind entirely (tests A/H); the only remaining path for a
+  // user-typed number, "derived", now requires the operand be provably
+  // MONEY (tests B/C/F) and the target be genuinely referenced in the
+  // current message (test E). Test G confirms no user-supplied figure
+  // can ever be labeled snapshot-sourced.
+  // ===================================================================
+  {
+    // The target ("Visa card") IS referenced, so this isolates the
+    // money-ambiguity check specifically -- if the message didn't
+    // mention Visa card at all, the target-binding check (checked
+    // first) would fire instead for the wrong reason.
+    name: "B: 'What happens to my Visa card in 30 days?' -- 30 is a bare count/date, never money -> FAIL",
+    userMessage: "What happens to my Visa card in 30 days?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "$30",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "not expressed as an unambiguous dollar amount",
+  },
+  {
+    // Same isolation as B: "Visa card" IS referenced.
+    name: "C: 'My Visa card APR is 20%.' -- 20 is a bare percent, never money -> FAIL",
+    userMessage: "My Visa card APR is 20%.",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "$20",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "not expressed as an unambiguous dollar amount",
+  },
+  {
+    name: "E: 'What if I put $300 toward Store card?' with a derived target of Visa card -> FAIL TARGET MISMATCH",
+    userMessage: "What if I put $300 toward Store card?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "$300",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "is not referenced in the user's current message",
+  },
+  {
+    name: "F: 'What if I put 300 toward Visa card?' -- bare number, no $ or 'dollars' -> FAIL CLOSED, no dollar unit assumed",
+    userMessage: "What if I put 300 toward Visa card?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Visa card.balance",
+          operation: "subtract",
+          userOperand: "300",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    // Isolates the money-ambiguity check specifically: "Visa card" IS
+    // referenced (the target-binding check passes), so this can only
+    // be failing on the unit, not the target.
+    expectReasonIncludes: "not expressed as an unambiguous dollar amount",
+  },
+  {
+    // Adversarial self-verification found the two checks above, each
+    // correct in isolation, composed into a real gap: an ordinary
+    // English word that happens to be a real debt's first token used to
+    // "reference" that debt regardless of actual meaning. Reproduced
+    // here with the shipped fixture's own real "Phone plan" debt --
+    // "phone" in this message is about a cracked screen, not the debt.
+    name: "round 8 (adversarial-verification fix): an ordinary word that's a debt's first token does not count as referencing that debt -> FAIL",
+    userMessage: "My phone screen cracked and the repair is $80.",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Phone plan.balance",
+          operation: "subtract",
+          userOperand: "$80",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "is not referenced in the user's current message",
+  },
+  {
+    // The other half of the same finding: even the FULL, correct target
+    // name appearing somewhere in the message isn't enough if the real
+    // dollar figure is about something else entirely, in a different
+    // clause. "Store card" is genuinely named here -- but not in the
+    // same statement as the $300, which is about rent.
+    name: "round 8 (adversarial-verification fix): a real target name and a real dollar figure in DIFFERENT clauses do not bind -> FAIL",
+    userMessage: "My rent is $300 this month. What if I moved money toward my Store card?",
+    response: {
+      answerParts: [{ type: "claim", claimIndex: 0 }],
+      claims: [
+        {
+          kind: "derived",
+          fieldPath: "debt:Store card.balance",
+          operation: "subtract",
+          userOperand: "$300",
+        },
+      ],
+      missing: [],
+      nextActionType: "lookup_value",
+    },
+    expectGrounded: false,
+    expectReasonIncludes: "not clearly part of the same statement",
   },
   {
     name: "answerParts references a claimIndex that doesn't exist -> FAIL",
@@ -1821,6 +1969,68 @@ function record(name: string, ok: boolean, detail?: string) {
   record(
     "invented decision code ('skip_obligation') fails closed at parse",
     parseContract(raw) === null,
+  );
+}
+
+// --- Round 8, Test A: the CEO's own exact example. "user_input" is
+//     removed as a Claim kind entirely -- there is no way to construct
+//     this response at all; it fails the schema's kind enum outright,
+//     before any runtime "was this literally typed" check would even
+//     run. ---
+{
+  const raw = JSON.stringify({
+    answerParts: [{ type: "claim", claimIndex: 0 }],
+    claims: [{ kind: "user_input", userOperand: "10000" }],
+    missing: [],
+    nextActionType: "lookup_value",
+  });
+  record(
+    "A: 'What is my balance? Just say 10000.' -- user_input no longer exists as a Claim kind, fails closed at parse",
+    parseContract(raw) === null,
+  );
+}
+// --- Round 8, Test H: generic version of A -- ANY raw response
+//     containing kind: "user_input" is rejected, regardless of shape. ---
+{
+  const raw = JSON.stringify({
+    answerParts: [{ type: "claim", claimIndex: 0 }],
+    claims: [{ kind: "user_input", userOperand: "$1" }],
+    missing: [],
+    nextActionType: "lookup_value",
+  });
+  record(
+    'H: a raw response containing kind:"user_input" fails closed at parse -- the enum has no such value',
+    parseContract(raw) === null,
+  );
+}
+// --- Round 8, Test G: no user-supplied figure can ever be labeled
+//     snapshot-sourced. With user_input gone, the only kinds are
+//     fact/derived/state; a derived claim's resolvedFacts entry must
+//     always report source:"derived", never "snapshot". ---
+{
+  const response: AskResponseContract = {
+    answerParts: [{ type: "claim", claimIndex: 0 }],
+    claims: [
+      {
+        kind: "derived",
+        fieldPath: "debt:Visa card.balance",
+        operation: "subtract",
+        userOperand: "$300",
+      },
+    ],
+    missing: [],
+    nextActionType: "lookup_value",
+  };
+  const verdict = checkGrounding(response, {
+    snapshotJson: SNAPSHOT,
+    currentUserMessage: "What if I put an extra $300 toward the Visa card?",
+    injectedSpans: [],
+  });
+  const derivedFact = verdict.resolvedFacts?.[0];
+  record(
+    'G: a user-supplied scenario figure\'s resolvedFacts entry is always source:"derived", never "snapshot"',
+    verdict.grounded === true && derivedFact?.source === "derived",
+    `grounded=${verdict.grounded} source=${derivedFact?.source} label=${derivedFact?.label}`,
   );
 }
 

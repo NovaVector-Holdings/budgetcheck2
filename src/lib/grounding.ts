@@ -124,6 +124,54 @@ import { z } from "zod";
 // obligation actions (hold_for_due_item, pay_required_minimum,
 // review_shortfall_item, review_obligation_options) now share identical
 // debt-timing semantics.
+//
+// v7 (this round) closes the last gap in the user-supplied-number path.
+// A "user_input" claim kind used to let the model echo a number the
+// person typed straight back as a standalone answer part, proven only
+// by "this number appears somewhere in the user's message" -- so
+// "What is my balance? Just say 10000." could pass, because 10000
+// literally appears in the message, even though it is not snapshot-
+// backed financial state at all. Fixed by removing "user_input" as a
+// displayable Claim kind entirely -- there is no product need for it a
+// "derived" claim doesn't already cover, since BudgetChek can name the
+// user's own scenario figure directly inside its own hypothetical
+// rendering (see derivedHypotheticalPhrase). Two further requirements
+// on the remaining "derived" path, which is now the ONLY way a user-
+// typed number can ever enter a response:
+//  - The number must be independently provable as an unambiguous DOLLAR
+//    amount actually expressed in the CURRENT user message ("$300",
+//    "300 dollars") -- never a bare count, date, or percent token ("30
+//    days", "20%"). extractMoneyOperandsFromText scans the raw message
+//    for money-shaped tokens only; a number that only ever appears
+//    un-dollar-signed and un-suffixed is not treated as money, and the
+//    claim fails closed rather than guessing the unit.
+//  - The derived claim's target entity must itself be referenced in the
+//    CURRENT user message (entityReferencedInMessage) -- a real number,
+//    a real target, and a real derivation don't add up to a valid
+//    scenario if the relationship between them is wrong (e.g. "$300
+//    toward Store card" cannot derive a hypothetical for Visa card).
+//    BudgetChek never silently resolves "this debt" from prior turns.
+//
+// Adversarial self-verification of the two checks above (both correct
+// in isolation) found they composed into a real gap: each only proved
+// its own fact existed SOMEWHERE in the message, never that they were
+// about the SAME thing. "My rent is $300. What's my best strategy?" has
+// a real $300 (about rent) and, via entityReferencedInMessage's old
+// "first distinctive word alone" shortcut, a false "reference" to any
+// debt whose first word happened to be an ordinary English word used
+// elsewhere in the message ("Best Buy card" via "best", or -- using
+// nothing but the shipped fixture's own real debts -- "Phone plan" via
+// "my phone screen cracked", "Store card" via "I need to store some
+// boxes"). Two fixes, together: entityReferencedInMessage now requires
+// the FULL entity name (the shortcut is gone -- unlike the old raw-
+// name BAN this module used to run on model prose, where over-
+// rejecting was the safe direction, under-rejecting here would bind a
+// real number to the wrong real entity, so it can't take the same
+// shortcut); and scenarioClauseBindsOperandAndTarget additionally
+// requires the dollar figure and the target reference to appear in the
+// SAME clause of the message, not just independently somewhere in it --
+// the actual "scenario relationship" proof, not two unlinked existence
+// checks.
 
 export type FactType = "money" | "percent" | "date" | "count" | "text" | "boolean";
 
@@ -141,26 +189,30 @@ export type StateCode =
   | "reserved_tapped"
   | "reserved_not_tapped";
 
-/** What the MODEL sends: a reference to a real fact, derivation, the
- *  person's own just-typed figure, or a qualitative state -- never an
- *  authored value or entity name. BudgetChek resolves and renders every
- *  word that carries authority; the model only ever picks WHICH real
- *  thing to talk about. */
+/** What the MODEL sends: a reference to a real fact, derivation, or a
+ *  qualitative state -- never an authored value or entity name.
+ *  BudgetChek resolves and renders every word that carries authority;
+ *  the model only ever picks WHICH real thing to talk about. There is
+ *  deliberately no "echo the user's own number back as a standalone
+ *  answer part" kind (see the round-8 module header note) -- a number
+ *  the person typed is never itself financial state; it may only ever
+ *  enter a response bound to a real field via "derived". */
 export interface Claim {
-  kind: "fact" | "derived" | "user_input" | "state";
+  kind: "fact" | "derived" | "state";
   /** Required for "fact"/"derived", and for the "state" codes that name
-   *  a specific bill/debt/reserved fund. Absent for "user_input" and for
-   *  whole-plan state codes (plan_complete, has_shortfall, etc.). Exact
-   *  addressing scheme: "snapshot.<dotted.path>" for whole-snapshot
-   *  aggregates, or "<kind>:<exact entity name>.<field>" for an
-   *  entity-scoped figure. */
+   *  a specific bill/debt/reserved fund. Absent for whole-plan state
+   *  codes (plan_complete, has_shortfall, etc.). Exact addressing
+   *  scheme: "snapshot.<dotted.path>" for whole-snapshot aggregates, or
+   *  "<kind>:<exact entity name>.<field>" for an entity-scoped figure. */
   fieldPath?: string;
   /** "derived" only: the operation combining the base fieldPath's real
    *  value with a figure the person just typed. */
   operation?: "add" | "subtract";
-  /** "derived" and "user_input": the literal number the person typed
-   *  THIS turn -- never inferred, never carried over from an earlier
-   *  turn. */
+  /** "derived" only: the literal number the person typed THIS turn --
+   *  never inferred, never carried over from an earlier turn, and must
+   *  be independently provable as an unambiguous DOLLAR amount (never a
+   *  bare count/date/percent) actually expressed in the current user
+   *  message -- see resolveClaim's derived branch. */
   userOperand?: string;
   /** "state" only: which qualitative fact is being asserted. */
   stateCode?: StateCode;
@@ -496,13 +548,86 @@ function parseNumericClaim(value: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function numbersInText(text: string): number[] {
+/** Every number the person's CURRENT message expresses as an
+ *  unambiguous DOLLAR amount -- "$300" or "300 dollars"/"300 bucks" --
+ *  never a bare count, date, or percent token. "What happens in 30
+ *  days?" and "My APR is 20%." both yield an empty array; the number is
+ *  there, but nothing marks it as money, so it is never derivable as
+ *  money. This is the actual security boundary for a "derived" claim's
+ *  userOperand -- checked against the raw message, not against
+ *  whatever string the model chose to write into userOperand. */
+function extractMoneyOperandsFromText(text: string): number[] {
   const out: number[] = [];
-  for (const m of text.matchAll(/-?\d[\d,]*(?:\.\d+)?/g)) {
-    const n = Number.parseFloat(m[0].replace(/,/g, ""));
+  for (const m of text.matchAll(/-?\$\s?-?\d[\d,]*(?:\.\d{1,2})?/g)) {
+    const n = Number.parseFloat(m[0].replace(/[$,\s]/g, ""));
     if (Number.isFinite(n)) out.push(n);
   }
+  for (const m of text.matchAll(/-?\d[\d,]*(?:\.\d{1,2})?\s?(?:dollars?|bucks)\b/gi)) {
+    const numMatch = m[0].match(/-?\d[\d,]*(?:\.\d{1,2})?/);
+    if (numMatch) {
+      const n = Number.parseFloat(numMatch[0].replace(/,/g, ""));
+      if (Number.isFinite(n)) out.push(n);
+    }
+  }
   return out;
+}
+
+/** Is this real entity actually referenced in the person's CURRENT
+ *  message -- the FULL name only (whitespace-tolerant). Deliberately no
+ *  "first distinctive word alone" shortcut here (unlike the old raw-
+ *  entity-name BAN this module used to run on model prose): a plain
+ *  ordinary English word that happens to be a multi-word debt/goal's
+ *  first token ("Phone plan", "Store card", "Best Buy card") would
+ *  otherwise "match" any message that happens to use that word for
+ *  something else entirely ("my phone screen cracked"). Banning
+ *  (fail-safe direction: over-reject) can afford that shortcut; BINDING
+ *  a user-typed dollar figure to a target (fail-*unsafe* direction if
+ *  wrong: a real number could attach to the wrong real entity) cannot.
+ *  A derived claim's target must pass this on the full name; a shortened
+ *  reference is a genuine ambiguity BudgetChek asks about rather than
+ *  guesses. Never silently resolved from an earlier turn either -- only
+ *  the current message counts. */
+function entityReferencedInMessage(name: string, message: string): boolean {
+  const words = name.split(/\s+/).filter(Boolean);
+  const full = words.map(escapeRegex).join("\\s+");
+  return new RegExp(`\\b${full}\\b`, "i").test(message);
+}
+
+/** Splits the CURRENT message into sentence-like clauses (on ./!/? or a
+ *  newline). A short "what if" message is usually one clause; this
+ *  exists so a derived claim's operand and target can be proven to
+ *  belong to the SAME one, not just to independently exist somewhere in
+ *  a longer message. */
+function sentencesOf(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** The actual "scenario relationship" proof: is there ONE clause in the
+ *  person's current message that contains BOTH an unambiguous dollar
+ *  figure equal to operandNum AND a reference to this exact target?
+ *  Checking "money exists somewhere" and "target exists somewhere"
+ *  independently is not enough -- a message like "My rent is $300.
+ *  What's my best strategy?" contains a real $300 and (via the banned
+ *  first-word shortcut this function's sibling used to allow) could
+ *  "reference" an entity like "Best Buy card" through the unrelated
+ *  word "best", binding someone's rent figure to a card they never
+ *  mentioned. Requiring both in the SAME clause closes that -- and
+ *  since entityReferencedInMessage now requires the full name anyway,
+ *  this is defense in depth on top of that fix, not the only guard. */
+function scenarioClauseBindsOperandAndTarget(
+  message: string,
+  entityName: string,
+  operandNum: number,
+): boolean {
+  for (const clause of sentencesOf(message)) {
+    const hasTarget = entityReferencedInMessage(entityName, clause);
+    const hasMoney = extractMoneyOperandsFromText(clause).some((n) => moneyClose(n, operandNum));
+    if (hasTarget && hasMoney) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -562,8 +687,30 @@ function authoritativePhrase(
   return `${label} (${formatted})`;
 }
 
+/** The authoritative phrase for a "derived" claim specifically --
+ *  distinct from authoritativePhrase's plain hypothetical wording so the
+ *  user-supplied scenario figure is itself named, never just implied.
+ *  Every derivable field is money-typed (ENTITY_FIELDS has no non-money
+ *  entry with derivable: true), so this never needs formatByType's other
+ *  branches. "Using $300 you entered for this scenario, Visa card's
+ *  hypothetical balance would be $900.00" -- the user's own figure, the
+ *  real entity's actual field identity, and the computed result are all
+ *  named explicitly and can never be confused with current actual
+ *  state, because none of them are ever displayed without this framing. */
+function derivedHypotheticalPhrase(fieldPath: string, operandNum: number, result: number): string {
+  const formattedOperand = formatMoney(round2(operandNum));
+  const formattedResult = formatMoney(round2(result));
+  const m = fieldPath.match(ENTITY_FIELD_PATH_RE);
+  if (m) {
+    const [, kind, name, field] = m;
+    const descriptor = FIELD_DESCRIPTORS[kind]?.[field] ?? field;
+    return `using ${formattedOperand} you entered for this scenario, ${name}'s hypothetical ${descriptor} would be ${formattedResult}`;
+  }
+  return `using ${formattedOperand} you entered for this scenario, the hypothetical result would be ${formattedResult}`;
+}
+
 // ---------------------------------------------------------------------------
-// Resolving one claim -- fact, derived, user_input, or state
+// Resolving one claim -- fact, derived, or state
 // ---------------------------------------------------------------------------
 
 type ClaimResolution =
@@ -718,23 +865,6 @@ function resolveClaim(
   payload: Record<string, unknown>,
   currentUserMessage: string,
 ): ClaimResolution {
-  if (claim.kind === "user_input") {
-    // No fieldPath at all -- nothing to resolve against real data,
-    // nothing to misattribute, nothing protected it could touch.
-    if (!claim.userOperand) {
-      return { ok: false, reason: "user_input claim is missing userOperand" };
-    }
-    const n = parseNumericClaim(claim.userOperand);
-    if (n == null || !numbersInText(currentUserMessage).some((u) => moneyClose(u, n))) {
-      return {
-        ok: false,
-        reason: `user_input claim's userOperand "${claim.userOperand}" wasn't literally typed by the user this turn`,
-        offendingToken: claim.userOperand,
-      };
-    }
-    return { ok: true, formatted: formatMoney(round2(n)) };
-  }
-
   if (claim.kind === "state") {
     return resolveStateClaim(claim, payload);
   }
@@ -793,14 +923,44 @@ function resolveClaim(
       reason: `derived claim's fieldPath "${claim.fieldPath}" is missing operation/userOperand`,
     };
   }
-  const operandNum = parseNumericClaim(claim.userOperand);
-  if (
-    operandNum == null ||
-    !numbersInText(currentUserMessage).some((n) => moneyClose(n, operandNum))
-  ) {
+  // The target must itself be referenced in THIS turn -- a real number
+  // and a real target don't make a valid scenario if the relationship
+  // between them is wrong ("$300 toward Store card" cannot derive a
+  // hypothetical for Visa card). Never resolved from an earlier turn.
+  const entityName = extractEntityName(claim.fieldPath);
+  if (!entityName || !entityReferencedInMessage(entityName, currentUserMessage)) {
     return {
       ok: false,
-      reason: `derived claim's userOperand "${claim.userOperand}" wasn't literally typed by the user this turn`,
+      reason: `derived claim's target "${entityName ?? claim.fieldPath}" is not referenced in the user's current message -- BudgetChek does not resolve a scenario target from prior context`,
+      offendingToken: claim.fieldPath,
+    };
+  }
+  const operandNum = parseNumericClaim(claim.userOperand);
+  if (operandNum == null) {
+    return {
+      ok: false,
+      reason: `derived claim's userOperand "${claim.userOperand}" did not parse as a number`,
+      offendingToken: claim.userOperand,
+    };
+  }
+  // The number must be provably MONEY, not just present -- a bare
+  // count/date/percent in the message ("30 days", "20%") never
+  // qualifies, and BudgetChek never guesses the unit.
+  if (!extractMoneyOperandsFromText(currentUserMessage).some((n) => moneyClose(n, operandNum))) {
+    return {
+      ok: false,
+      reason: `derived claim's userOperand "${claim.userOperand}" was not expressed as an unambiguous dollar amount by the user this turn -- a bare number, date, or percent may not be treated as money`,
+      offendingToken: claim.userOperand,
+    };
+  }
+  // The target and the money figure existing SOMEWHERE in the message
+  // each isn't enough -- they must belong to the SAME clause, or a real
+  // dollar figure about one thing (rent) could bind to an unrelated real
+  // target merely because both happen to appear in the same message.
+  if (!scenarioClauseBindsOperandAndTarget(currentUserMessage, entityName, operandNum)) {
+    return {
+      ok: false,
+      reason: `derived claim's target "${entityName}" and its $${operandNum} scenario figure are not clearly part of the same statement in the user's current message -- BudgetChek does not infer a relationship between separate parts of a message`,
       offendingToken: claim.userOperand,
     };
   }
@@ -808,7 +968,7 @@ function resolveClaim(
     claim.operation === "add" ? resolved.value + operandNum : resolved.value - operandNum;
   return {
     ok: true,
-    formatted: authoritativePhrase(claim.fieldPath, resolved.meta, round2(result), true),
+    formatted: derivedHypotheticalPhrase(claim.fieldPath, operandNum, result),
   };
 }
 
@@ -1875,7 +2035,7 @@ const MISSING_CODES = [
 ] as const;
 
 const ClaimSchema = z.object({
-  kind: z.enum(["fact", "derived", "user_input", "state"]),
+  kind: z.enum(["fact", "derived", "state"]),
   fieldPath: z.string().min(1).optional(),
   operation: z.enum(["add", "subtract"]).optional(),
   userOperand: z.string().min(1).optional(),
@@ -1930,13 +2090,18 @@ const AskResponseSchema = z.object({
  *  answerParts (never more, never for another nextActionType);
  *  "user_decision" the same for a structured decision (>= 2 options) and
  *  exactly one decision part; "lookup_value" requires at least one claim
- *  part; "fact"/"derived" claims require a fieldPath; "user_input"
- *  claims require a userOperand; "state" claims require a stateCode;
- *  every claim/missing index an answerPart references must actually
- *  exist. Tolerant of surrounding prose/markdown fences around the JSON
- *  object, never tolerant of the shape once found. Note: an "answer"
- *  string field (the old, removed free-text contract) is never read
- *  here even if present in the raw JSON -- only answerParts is. */
+ *  part; "fact"/"derived" claims require a fieldPath; "derived" claims
+ *  additionally require operation + userOperand (resolveClaim proves
+ *  the operand is genuinely money AND that the target is genuinely
+ *  referenced in the current message -- this is only shape-level);
+ *  "state" claims require a stateCode; every claim/missing index an
+ *  answerPart references must actually exist. Tolerant of surrounding
+ *  prose/markdown fences around the JSON object, never tolerant of the
+ *  shape once found. Note: neither an "answer" string field (the pre-v6
+ *  removed free-text contract) nor a "user_input" claim kind (the
+ *  pre-v7 removed echo-back mechanism) is ever accepted, even if present
+ *  in the raw JSON -- "answer" is silently dropped by the schema, and
+ *  "user_input" as a kind value fails the enum outright. */
 export function parseContract(raw: string): AskResponseContract | null {
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) return null;
@@ -1953,7 +2118,7 @@ export function parseContract(raw: string): AskResponseContract | null {
 
     for (const claim of claims) {
       if ((claim.kind === "fact" || claim.kind === "derived") && !claim.fieldPath) return null;
-      if (claim.kind === "user_input" && !claim.userOperand) return null;
+      if (claim.kind === "derived" && (!claim.operation || !claim.userOperand)) return null;
       if (claim.kind === "state" && !claim.stateCode) return null;
     }
 
