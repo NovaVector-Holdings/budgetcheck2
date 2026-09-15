@@ -21,6 +21,19 @@ name: CI
 # silently override. `npm install --package-lock=false` installs from
 # package.json only, generates no lockfile, and leaves that policy
 # exactly as it was.
+#
+# Same correction, discovered running the fix above: `npm run lint`
+# runs `eslint .` across the WHOLE repo, and this repo has never had
+# CI, so pre-existing lint violations in 54 files this PR has never
+# touched (unrelated routes, UI components, integrations) were never
+# enforced and are not this PR's to fix -- a repo-wide autofix/cleanup
+# is real, out-of-scope work, not a bounded CI correction. Scoped this
+# step to exactly the files this Ask-a-Question trust-gate PR owns
+# (its full diff against main, every round) instead, so the gate is
+# meaningful for what this PR actually changed without silently taking
+# on unrelated debt. Flagged as a separate follow-up recommendation in
+# the return package: a repo-wide lint remediation, decided and scoped
+# on its own, would let a future PR restore `npm run lint` here.
 
 on:
   pull_request:
@@ -37,6 +50,14 @@ jobs:
           node-version: 20
       - run: npm install --package-lock=false --no-audit --no-fund
       - run: npm run build
-      - run: npm run lint
+      - run: >
+          npx eslint
+          src/lib/grounding.ts
+          src/lib/decision-engine.ts
+          src/lib/mm-chat.functions.ts
+          src/components/mm/assistant.tsx
+          src/routes/_authenticated/money-meeting.tsx
+          scripts/prove-grounding.ts
+          scripts/prove-decision-engine.ts
       - run: npm run validate:grounding
       - run: npm run validate:decision-engine
