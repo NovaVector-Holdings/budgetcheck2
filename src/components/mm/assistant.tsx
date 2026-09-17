@@ -5,10 +5,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { askMoneyMeeting } from "@/lib/mm-chat.functions";
 import type { EngineSnapshot } from "@/lib/decision-engine";
 import type { MmMessage, MmSession } from "@/lib/mm";
+import type { UsedFact } from "@/lib/grounding";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { Loader2, Plus, Send } from "lucide-react";
+import { Loader2, Plus, Send, ShieldCheck, ShieldAlert } from "lucide-react";
 
 interface Props {
   userId: string;
@@ -30,6 +31,14 @@ export function Assistant({ userId, snapshot, context }: Props) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+  // Trust disclosure for the most recent answer only -- not persisted, since
+  // mm_messages stores plain text. Keyed by the message id it belongs to so
+  // it never attaches itself to the wrong bubble after a session switch.
+  const [lastAnswerMeta, setLastAnswerMeta] = useState<{
+    forContent: string;
+    grounded: boolean;
+    factsUsed: UsedFact[];
+  } | null>(null);
 
   const { data: sessions = [] } = useQuery({
     queryKey: ["mm_sessions", userId],
@@ -78,20 +87,43 @@ export function Assistant({ userId, snapshot, context }: Props) {
   const send = useMutation({
     mutationFn: async (text: string) => {
       const sid = await ensureSession(text);
-      await supabase.from("mm_messages").insert({ session_id: sid, user_id: userId, role: "user", content: text });
+      await supabase
+        .from("mm_messages")
+        .insert({ session_id: sid, user_id: userId, role: "user", content: text });
       qc.invalidateQueries({ queryKey: ["mm_messages", sid] });
 
-      const history = [...messages.map((m) => ({ role: m.role, content: m.content })), { role: "user" as const, content: text }];
-      const { reply } = await ask({
-        data: { messages: history.slice(-20), snapshot: JSON.stringify({ snapshot, ...context }) },
+      const history = [
+        ...messages.map((m) => ({ role: m.role, content: m.content })),
+        { role: "user" as const, content: text },
+      ];
+      const res = await ask({
+        // `snapshot` spreads LAST, deliberately: round-9 adversarial
+        // review flagged that `{ snapshot, ...context }` would let a
+        // future `context` key literally named "snapshot" silently
+        // shadow the real EngineSnapshot object. `context`'s keys are
+        // fixed today (accounts/reserved/caps/bills/debts/goals/
+        // payFrequency/nextPayDate) with no collision, but nothing in
+        // its type enforces that -- spreading it first makes this
+        // structurally safe rather than merely accidentally safe.
+        data: { messages: history.slice(-20), snapshot: JSON.stringify({ ...context, snapshot }) },
       });
 
-      await supabase.from("mm_messages").insert({ session_id: sid, user_id: userId, role: "assistant", content: reply });
-      await supabase.from("mm_sessions").update({ updated_at: new Date().toISOString() }).eq("id", sid);
-      return sid;
+      await supabase
+        .from("mm_messages")
+        .insert({ session_id: sid, user_id: userId, role: "assistant", content: res.reply });
+      await supabase
+        .from("mm_sessions")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", sid);
+      return { sid, res };
     },
-    onSuccess: (sid) => {
+    onSuccess: ({ sid, res }) => {
       setDraft("");
+      setLastAnswerMeta({
+        forContent: res.reply,
+        grounded: res.grounded,
+        factsUsed: res.factsUsed,
+      });
       qc.invalidateQueries({ queryKey: ["mm_messages", sid] });
       qc.invalidateQueries({ queryKey: ["mm_sessions", userId] });
     },
@@ -111,7 +143,10 @@ export function Assistant({ userId, snapshot, context }: Props) {
           variant="outline"
           size="sm"
           className="w-full"
-          onClick={() => setSessionId(null)}
+          onClick={() => {
+            setSessionId(null);
+            setLastAnswerMeta(null);
+          }}
           disabled={!active}
         >
           <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
@@ -123,9 +158,14 @@ export function Assistant({ userId, snapshot, context }: Props) {
               <li key={s.id}>
                 <button
                   type="button"
-                  onClick={() => setSessionId(s.id)}
+                  onClick={() => {
+                    setSessionId(s.id);
+                    setLastAnswerMeta(null);
+                  }}
                   className={`w-full truncate rounded-md px-3 py-2 text-left text-sm transition-colors ${
-                    s.id === active ? "bg-secondary text-ink" : "text-muted-foreground hover:text-ink"
+                    s.id === active
+                      ? "bg-secondary text-ink"
+                      : "text-muted-foreground hover:text-ink"
                   }`}
                 >
                   {s.title}
@@ -164,11 +204,18 @@ export function Assistant({ userId, snapshot, context }: Props) {
             <div key={m.id} className={m.role === "user" ? "flex justify-end" : ""}>
               <div
                 className={`max-w-[42rem] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm ${
-                  m.role === "user" ? "bg-primary text-primary-foreground" : "border border-border bg-background text-ink"
+                  m.role === "user"
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border bg-background text-ink"
                 }`}
               >
                 {m.content}
               </div>
+              {m.role === "assistant" &&
+                lastAnswerMeta &&
+                lastAnswerMeta.forContent === m.content && (
+                  <AnswerTrustNote meta={lastAnswerMeta} />
+                )}
             </div>
           ))}
 
@@ -198,13 +245,65 @@ export function Assistant({ userId, snapshot, context }: Props) {
             <p className="text-xs text-muted-foreground">
               Answers use only the numbers you entered. Educational, not financial advice.
             </p>
-            <Button size="sm" onClick={() => submit(draft)} disabled={send.isPending || !draft.trim()}>
+            <Button
+              size="sm"
+              onClick={() => submit(draft)}
+              disabled={send.isPending || !draft.trim()}
+            >
               <Send className="mr-1.5 h-3.5 w-3.5" aria-hidden />
               Ask
             </Button>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Makes the "answers use only the numbers you entered" claim inspectable
+ *  instead of just asserted -- shown once, for the answer that was just
+ *  given, not persisted or shown again after a reload. */
+function AnswerTrustNote({ meta }: { meta: { grounded: boolean; factsUsed: UsedFact[] } }) {
+  const [open, setOpen] = useState(false);
+
+  if (!meta.grounded) {
+    return (
+      <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <ShieldAlert className="h-3.5 w-3.5 text-amber-600" aria-hidden />
+        Held back because it couldn't be tied to your numbers — not shown as your real answer.
+      </p>
+    );
+  }
+
+  if (meta.factsUsed.length === 0) return null;
+
+  return (
+    <div className="mt-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-ink"
+      >
+        <ShieldCheck className="h-3.5 w-3.5 text-primary" aria-hidden />
+        {open ? "Hide what this used" : "Show what this used"}
+      </button>
+      {open && (
+        <ul className="mt-1.5 space-y-1 rounded-lg border border-border bg-secondary/40 p-2.5 text-xs text-muted-foreground">
+          {meta.factsUsed.map((f, i) => (
+            <li key={i} className="flex items-baseline justify-between gap-3">
+              <span>
+                {f.label}
+                {f.source === "derived" && (
+                  <span className="ml-1.5 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-ink">
+                    hypothetical
+                  </span>
+                )}
+              </span>
+              <span className="font-medium text-ink">{f.value}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
