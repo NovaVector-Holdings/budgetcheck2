@@ -132,6 +132,19 @@ function Briefing({ state }: { state: MoneyState }) {
         </div>
       </div>
 
+      {/* CEO review, "GATE 1 BOUNDED FINALIZATION" correction 1: Round-2
+          evidence showed the "Keep available" vs "Buffer" distinction
+          isn't self-evident from the labels alone. One compact line,
+          right beneath the calculation it explains -- no second card --
+          shown only when at least one of the two terms it defines is
+          actually on screen above. */}
+      {(hasItems || buffer > 0) && (
+        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+          Keep available is for the items listed before payday. Buffer is the extra amount you chose
+          to leave untouched.
+        </p>
+      )}
+
       {/* Trust boundary: never "safe to spend," never implied as a live
           balance. Stated in the same breath as the number itself, not a
           disclaimer buried below it. */}
@@ -148,10 +161,20 @@ function Briefing({ state }: { state: MoneyState }) {
 
       {/* What should I focus on next -- the engine's own honest sentence,
           already carrying the unknown-debt-timing caveat when one
-          applies (see decision-engine.ts's buildFundingPlan). */}
+          applies (see decision-engine.ts's buildFundingPlan).
+          CEO review, "GATE 1 BOUNDED FINALIZATION" correction 2: this
+          heading must not claim an action exists when the engine is
+          only reporting coverage/status. A real action -- something to
+          actually go do -- exists ONLY in the shortfall case (the
+          headline literally instructs "start with the one at the
+          cutoff line"). Every non-shortfall headline (fully covered,
+          nothing due, or either of those with the unknown-timing
+          caveat) is status/information, never an instruction, so it's
+          labeled "Plan status" instead -- never manufacturing an
+          action just to keep the old heading. */}
       <div className={`mt-5 rounded-lg p-4 ${shortfall ? "bg-destructive/10" : "bg-secondary/60"}`}>
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Next money move
+          {shortfall ? "Next money move" : "Plan status"}
         </p>
         <p
           className={`mt-1 text-sm leading-relaxed ${shortfall ? "text-destructive" : "text-ink"}`}

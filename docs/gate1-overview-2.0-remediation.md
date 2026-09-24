@@ -8,6 +8,29 @@ authoritative for Gate 1 and Gate 2 (design + human validation), with `paycheck-
 prior `feature/overview-briefing-phase1` work treated strictly as reference evidence for
 calculation presentation and terminology, not transplanted code.
 
+**2026-09-23 update — "GATE 1 BOUNDED FINALIZATION."** Design direction approved; 3 bounded UX
+corrections applied (no redesign, no architecture change):
+
+1. **Keep available vs Buffer explanation** — Round-2 evidence showed the labels alone aren't
+   self-evident. One compact line, no new card: *"Keep available is for the items listed before
+   payday. Buffer is the extra amount you chose to leave untouched."* — shown only when at least
+   one of the two terms it defines is actually on screen.
+2. **State-aware "Next money move" vs "Plan status"** — the heading no longer claims an action
+   exists when the engine is only reporting coverage/status. A real action exists ONLY in the
+   shortfall case (the headline literally says "start with the one at the cutoff line"); every
+   non-shortfall headline is now labeled **Plan status** instead of **Next money move**. See
+   `Briefing`'s `shortfall` boolean in `paycheck-briefing.tsx` — already the exact right signal,
+   no new state needed.
+3. **Realistic Gate-2 fixture data** — the shortfall proof's temporary obligation was re-captured
+   using a neutral, realistic label ("Car repair", $900) instead of the internal QA label from
+   the first pass. See `overview-shortfall-state.png` (replaced).
+
+All 5 proofs (desktop light/dark, mobile 390, missing-data, shortfall) recaptured against the
+current code and current demo-account dates (the account's `next_pay_date`/bill due dates needed
+a routine refresh forward in time since the first capture — a fixed-date demo fixture goes stale
+as real time passes; refreshed to a current, realistic near-future cycle, not a data model
+change). axe-core re-run: 0 violations, both themes, unchanged.
+
 ## 1. Baseline assessment
 
 Before this change, `overview.tsx`:
