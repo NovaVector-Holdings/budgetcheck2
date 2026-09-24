@@ -118,17 +118,26 @@ pay cadence), never a hand-rolled list. Each entry links straight to where it's 
 ## 7. Complete-data healthy state
 
 See `overview-desktop-light.png` / `overview-desktop-dark.png` / `overview-mobile-390.png` — all
-three captured against the same real account state (funding fully covered, `$455.00` estimated
-remaining, the honest debt-timing caveat from PR #10 flowing through automatically since
-`snap.headline` already carries it).
+three captured against the same real account state (funding fully covered, `$335.00` estimated
+remaining, "Plan status" labeling per correction 2, the honest debt-timing caveat from PR #10
+flowing through automatically since `snap.headline` already carries it). *(Corrected 2026-09-24:
+this section originally cited the first capture pass's `$455.00` figure; the current proofs —
+recaptured for the 2026-09-23 finalization pass, after the demo account's dates were refreshed
+forward in time — show `$335.00`. Documentation-only correction, not a UI change.)*
 
 ## 8. Shortfall state
 
-See `overview-shortfall-state.png` — captured by temporarily adding a real $5,000 obligation to
-the demo account, screenshotting, then deleting it (verified restored to the original 5 real
-bills afterward). `Short by $4,545.00` renders in the destructive tone, `Next money move` names
-the actual cutoff item, and the debt-timing caveat is still present and accurate in the shortfall
-sentence too.
+See `overview-shortfall-state.png`. *(Corrected 2026-09-24: this section originally described the
+FIRST capture pass's temporary fixture — a $5,000 obligation literally named "Gate 1 temp
+shortfall proof...", producing "Short by $4,545.00" — which the 2026-09-23 finalization pass
+replaced per correction 3. The current, final proof uses a realistic, neutral fixture instead.)*
+Captured by temporarily adding a real **"Car repair," $900** obligation to the demo account,
+screenshotting, then deleting it (verified restored to the original 5 real bills afterward). The
+actual rendered result: `Keep available for 3 items −$1,105.00`, `Buffer −$100.00`, **`Short by
+$565.00`** in the destructive tone. The heading correctly reads `Next money move` (not `Plan
+status`) since this is the one real shortfall case — the headline names the actual cutoff item
+("Car repair") and instructs starting there, and the debt-timing caveat is still present and
+accurate in the same sentence.
 
 ## 9–11. Desktop light / desktop dark / mobile 390 proofs
 
