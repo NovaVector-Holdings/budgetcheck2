@@ -25,3 +25,7 @@
 
 
 
+
+## Plaid bank connection (awaiting go-ahead + Plaid keys)
+- [x] PRD/spec PDF (v2: full profile accuracy — transactions, balances, debts, recurring bills)
+- [ ] Build integration — blocked on Plaid client ID + Sandbox secret
