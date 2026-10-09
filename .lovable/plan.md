@@ -1,39 +1,40 @@
-# Simplify the My Money Overview
+# Overview refinements from the usability survey
 
-## Team assessment
-The Overview had grown to nine separate content blocks. Several repeat another card’s answer or belong on a deeper page. The first screen should answer three questions only: **What do I have now? Am I covered until payday? What should I do next?**
+## What the survey is probing
+The seven questions test five things: (1) whether the screen's purpose is obvious, (2) whether one number clearly matters most, (3) whether it feels like a real product or a prototype, (4) whether "Estimated remaining" is understood and trusted enough to act on, and (5) whether "Keep available" vs "Buffer" is confusing. Each maps to a concrete fix below — no math changes, only presentation and wording.
 
-## Keep and strengthen
-- Keep **Am I okay until my next paycheck?** as the main forecast.
-- Keep **Your next money move** as the single recommended action.
-- Rename **Money on hand** to **Current available balance** and visually integrate it with the payday forecast as its starting number.
-- Keep a compact **Your progress** summary linking to Savings and Debt, without separate oversized cards.
-- Keep a **small debt-free-date visual** on Overview so the main money goal stays in sight.
-- Show setup completeness only when information is missing, as a compact prompt rather than another permanent card.
+## Planned changes
 
-## Remove from Overview
-- Remove **Estimated left this month**. Its current formula subtracts remaining bills from full monthly income, but ignores spending already made and the current balance. It can look like spendable money when it is not.
-- Remove the second **One move to make next** card because it duplicates **Your next money move**.
-- Remove the standalone **Coming up** card because the payday forecast already lists the urgent bills; the full 30-day list remains on Bills.
+### 1. One number that obviously matters most
+- Make **Estimated remaining** the visual anchor of the paycheck briefing: larger type, and a one-line plain-language label directly under it: "What's left after the bills due before payday and your buffer."
+- De-emphasize the intermediate rows (Balance, Keep available, Buffer) with smaller, quieter styling so the eye lands on the result first.
 
-## Move to more appropriate pages
-- Keep the full **budget method** breakdown in Reports, where users expect analysis rather than immediate action.
-- Keep the full **debt-free date** projection on Debt; Overview will show a small goal graphic only.
+### 2. "Estimated remaining" meaning and trust
+- Rename the label to **"Left over until payday (estimate)"** so the timeframe is in the name, not just the explainer.
+- Keep the existing honesty line ("not a live bank balance…") but tighten it to one sentence and place it immediately under the number, where confidence is decided.
+- When debt minimums lack due dates, keep the existing note — it already explains why the estimate can't confirm every payment.
 
-## Resulting hierarchy
-1. Greeting and current focus
-2. Current available balance + payday forecast
-3. Your next money move
-4. Compact savings/debt progress links (with debt-free-date mini goal)
+### 3. "Keep available" vs "Buffer" confusion
+- Rename the row **"Keep available for N items"** to **"Bills due before payday (N)"** — it says what the money is *for*, not an instruction.
+- Rename **"Buffer"** to **"Your safety cushion"** with a tooltip-style sub-line: "Extra you chose to leave untouched."
+- In the Current balance card, change "buffer kept aside" to the same "safety cushion" wording so the term is consistent everywhere.
+
+### 4. "What should I do next?" clarity
+- The briefing card ends with a single next-step line tied to the result: covered → "You're covered through {date}. Next: put the leftover toward your focus — {money goal}."; shortfall → link to move a due date or add cash; no obligations → link to Savings/Debt.
+- This replaces the separate "Plan status" box's role as the action source, so there's one answer to "what now?".
+
+### 5. Real-product feel
+- Add the "as of {date}" freshness cue to the briefing card (already on Current balance) so numbers feel current, not static prototype data.
+- Consistent card headings: "Paycheck briefing" stays; ensure the greeting, focus line, and cards share one visual rhythm (spacing, eyebrow styles) on desktop and mobile.
+
+## Out of scope
+- No changes to the paycheck math, stored data, or the no-guessing rule.
+- No new cards; this is wording, hierarchy, and one next-step line.
 
 ## Technical notes
-- Preserve all existing calculations and stored data except the misleading monthly estimate display.
-- Reuse the existing design system and responsive patterns.
-- Correct the unrelated sign-in hydration mismatch without changing sign-in behavior.
+- Files touched: `src/components/paycheck-cards.tsx` (labels, hierarchy, next-step line), `src/routes/_authenticated/overview.tsx` (greeting/focus spacing if needed).
+- Copy only — no schema, no server functions.
 
 ## Validation
-- Check complete-data and missing-data states.
-- Verify desktop and mobile layouts.
-- Confirm Overview presents one actual balance, one forecast, and one next action without duplicate cards, while still showing the debt-free goal.
-- Confirm sign-in loads without hydration errors.
-
+- Typecheck with `bunx tsgo --noEmit`.
+- Playwright pass on `/overview` (demo account) at desktop and mobile widths: confirm one dominant number, new labels, next-step line, and no console errors.
