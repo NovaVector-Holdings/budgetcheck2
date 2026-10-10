@@ -1,9 +1,22 @@
+import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { fmt } from "@/lib/money";
-import { formatDay } from "@/lib/decision-engine";
+import { formatDay, formatShort } from "@/lib/decision-engine";
+import { balanceSource, spendableAccounts } from "@/lib/mm";
+import {
+  derivePlanStatus,
+  oldestAsOf,
+  type FootingRow,
+  type KeepItem,
+  type PlanStatus,
+} from "@/lib/plan-status";
+import { Button } from "@/components/ui/button";
+import { BalanceForm, BalanceLine } from "@/components/overview/balance-update";
 import type { useMoneyState } from "@/hooks/use-money-state";
 
-// Gate 1 — BudgetChek 2.0 Overview Human-Evidence Remediation.
+// Gate 1 — BudgetChek 2.0 Overview Human-Evidence Remediation, then
+// Gate 2 remediation (CEO ruling "GATE 2 RESULT + FINAL REMEDIATION PATH",
+// 2026-10-09).
 //
 // This is the paycheck-first decision hero: the ONE thing a person should
 // be able to answer without interpreting an analytics dashboard --
@@ -12,12 +25,18 @@ import type { useMoneyState } from "@/hooks/use-money-state";
 //   3. What may remain, based on what I entered?
 //   4. What should I focus on next?
 //
-// Every figure here is read straight off state.snapshot -- the SAME
-// computeSnapshot() result Money Meeting/Weekly Check-in/Ask a Question
-// all use. This intentionally replaces the old Overview's separate
-// buildPaycheckPlan() calculation (src/lib/paycheck.ts): one governed
-// engine, not two. See docs/gate1-overview-2.0-remediation.md for the
-// Round-2 survey finding -> design response mapping this implements.
+// Every figure here is read off state.snapshot -- the SAME computeSnapshot()
+// result Money Meeting/Weekly Check-in/Ask a Question all use (one governed
+// engine, not two) -- through derivePlanStatus(), a pure, proven derivation
+// (scripts/prove-plan-status.ts) that adds no money math of its own.
+//
+// What Gate 2's evidence changed: a large positive "Estimated remaining" was
+// read as spendable money even with disclaimer language beside it. So when a
+// REQUIRED obligation can't be placed in the paycheck window (a debt minimum
+// with no due date), the plan is INCOMPLETE and says so as the dominant
+// message; any dollar figure from the known items is demoted to a labeled,
+// visually subordinate PARTIAL calculation. The normal "Estimated remaining"
+// is shown only for a complete plan.
 
 type MoneyState = ReturnType<typeof useMoneyState>;
 
@@ -27,7 +46,19 @@ type MoneyState = ReturnType<typeof useMoneyState>;
  *  goals) is optional richness, not a blocker, so it's never listed
  *  here. This is why the CTA below disappears the moment it's actually
  *  true, rather than needing a separate "mark as dismissed" state. */
-function SetupNeeded({ missing }: { missing: MoneyState["snapshot"]["missing"] }) {
+function SetupNeeded({
+  status,
+  state,
+  userId,
+  balance,
+}: {
+  status: Extract<PlanStatus, { kind: "setup" }>;
+  state: MoneyState;
+  userId: string;
+  /** Present when a balance IS on file, so it (and the buffer) stay editable
+   *  even while payday / cadence are still missing. */
+  balance: { source: "accounts" | "profile"; amount: number; asOf: string | null } | null;
+}) {
   return (
     <section className="paper-card p-6 sm:p-8">
       <p className="eyebrow">Paycheck briefing</p>
@@ -36,19 +67,45 @@ function SetupNeeded({ missing }: { missing: MoneyState["snapshot"]["missing"] }
         BudgetChek won't guess your balance, your next payday, or how often you're paid — add those
         and your paycheck briefing appears here automatically.
       </p>
-      <ul className="mt-5 space-y-2">
-        {missing.map((m) => (
-          <li key={m.field}>
-            <Link
-              to={m.to}
-              className="flex items-center justify-between rounded-lg border border-border p-3 text-sm text-ink transition-colors hover:bg-secondary/50"
-            >
-              <span>{m.label}</span>
-              <span className="text-primary">Add it →</span>
-            </Link>
-          </li>
-        ))}
-      </ul>
+      {status.needsBalance && (
+        <div className="mt-5">
+          <BalanceForm
+            userId={userId}
+            source="none"
+            profileBalance={null}
+            buffer={Number(state.profile?.spending_buffer ?? 0)}
+            heading="Start with your balance"
+            onDone={() => {}}
+          />
+        </div>
+      )}
+      {balance && (
+        <div className="mt-5">
+          <BalanceLine
+            userId={userId}
+            source={balance.source}
+            balance={balance.amount}
+            asOf={balance.asOf}
+            profileBalance={state.profile?.cash_on_hand ?? null}
+            buffer={Number(state.profile?.spending_buffer ?? 0)}
+          />
+        </div>
+      )}
+      {status.missing.length > 0 && (
+        <ul className="mt-5 space-y-2">
+          {status.missing.map((m) => (
+            <li key={m.field}>
+              <Link
+                to={m.to}
+                className="flex items-center justify-between rounded-lg border border-border p-3 text-sm text-ink transition-colors hover:bg-secondary/50"
+              >
+                <span>{m.label}</span>
+                <span className="text-primary">Add it →</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
@@ -57,97 +114,268 @@ function CalcRow({
   label,
   value,
   emphasize,
+  muted,
+  noRule,
 }: {
   label: string;
   value: string;
   emphasize?: boolean;
+  muted?: boolean;
+  /** The row's items follow directly beneath it, so no divider between them. */
+  noRule?: boolean;
 }) {
   return (
     <div
-      className={`flex items-baseline justify-between py-2.5 ${
-        emphasize ? "" : "border-b border-border/70 last:border-0"
+      className={`flex items-baseline justify-between gap-3 py-2.5 ${
+        emphasize || noRule ? "" : "border-b border-border/70 last:border-0"
       }`}
     >
       <span
-        className={emphasize ? "text-sm font-medium text-ink" : "text-sm text-muted-foreground"}
+        className={
+          emphasize
+            ? muted
+              ? "text-sm font-medium text-muted-foreground"
+              : "text-sm font-medium text-ink"
+            : "text-sm text-muted-foreground"
+        }
       >
         {label}
       </span>
-      <span className={emphasize ? "font-serif text-3xl text-ink" : "text-sm text-ink"}>
+      <span
+        className={`whitespace-nowrap ${
+          emphasize
+            ? muted
+              ? "font-serif text-xl text-muted-foreground"
+              : "font-serif text-3xl text-ink"
+            : "text-sm text-ink"
+        }`}
+      >
         {value}
       </span>
     </div>
   );
 }
 
-/** The full paycheck briefing -- shown once setup is complete (real
- *  balance/payday/cadence on file, snap.missing is empty). computeSnapshot
- *  only ever returns a null funding/window when next_pay_date couldn't be
- *  projected at all -- which requires next_pay_date itself to be absent,
- *  and that's one of the three fields snap.missing checks. So an empty
- *  missing list here structurally guarantees funding/window are real,
- *  computed values, never null; the two `!` below encode that guarantee
- *  rather than working around it. */
-function Briefing({ state }: { state: MoneyState }) {
-  const snap = state.snapshot;
-  const funding = snap.funding!;
-  const window = snap.window!;
+function signed(n: number) {
+  return `${n < 0 ? "−" : "+"}${fmt(Math.abs(n))}`;
+}
 
-  // No funding plan items at all (nothing due, nothing tracked) is a
-  // real, distinct state from "funding plan exists and is fully
-  // covered" -- both are healthy, but the wording must not claim to
-  // cover items that were never evaluated because none exist.
-  const hasItems = funding.items.length > 0;
-  const remaining = funding.available - funding.totalRequested;
-  const shortfall = remaining < 0;
-  const buffer = snap.reservedTotal + state.engineInput.safeBuffer;
-  const itemCount = funding.items.length;
+/** What "Keep available" is made of, itemized so it never reads as a bare
+ *  number. Survey evidence: people could not say what the items were. */
+function KeepList({ items }: { items: KeepItem[] }) {
+  return (
+    <ul className="-mt-1 mb-1 space-y-1 border-b border-border/70 pb-2.5 pl-3">
+      {items.map((i) => (
+        <li
+          key={i.id}
+          className="flex items-baseline justify-between gap-3 text-xs text-muted-foreground"
+        >
+          <span>
+            {i.label}
+            {i.dueDate ? ` · due ${formatShort(i.dueDate)}` : ""}
+          </span>
+          <span className="whitespace-nowrap">{fmt(i.amount)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The visible calculation: Balance, minus what's due, minus what's set
+ *  aside. The rows come from derivePlanStatus and provably sum to the
+ *  remainder printed under them. */
+function Footing({
+  status,
+  state,
+  userId,
+}: {
+  status: Exclude<PlanStatus, { kind: "setup" }>;
+  state: MoneyState;
+  userId: string;
+}) {
+  return (
+    <div>
+      {status.footing.map((row: FootingRow) => {
+        if (row.key === "balance") {
+          return (
+            <BalanceLine
+              key="balance"
+              userId={userId}
+              source={status.balanceSource}
+              balance={status.balance}
+              asOf={status.balanceAsOf}
+              profileBalance={state.profile?.cash_on_hand ?? null}
+              buffer={Number(state.profile?.spending_buffer ?? 0)}
+            />
+          );
+        }
+        if (row.key === "keep") {
+          return (
+            <div key="keep">
+              <CalcRow label={row.label} value={signed(row.amount)} noRule />
+              <KeepList items={status.keepItems} />
+            </div>
+          );
+        }
+        return <CalcRow key={row.key} label={row.label} value={signed(row.amount)} />;
+      })}
+    </div>
+  );
+}
+
+/** One next focus -- never a list of competing priorities. */
+function NextFocus({
+  heading,
+  children,
+  tone = "neutral",
+}: {
+  heading: string;
+  children: ReactNode;
+  tone?: "neutral" | "alert";
+}) {
+  return (
+    <div
+      className={`mt-5 rounded-lg p-4 ${tone === "alert" ? "bg-destructive/10" : "bg-secondary/60"}`}
+    >
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{heading}</p>
+      {children}
+    </div>
+  );
+}
+
+/** PLAN INCOMPLETE -- the dominant state. The incomplete message leads; the
+ *  known-item arithmetic follows as a labeled, visually subordinate partial. */
+function IncompleteBriefing({
+  status,
+  state,
+  userId,
+}: {
+  status: Extract<PlanStatus, { kind: "incomplete" }>;
+  state: MoneyState;
+  userId: string;
+}) {
+  const many = status.unplaced.length > 1;
+  const short = status.remainder < 0;
+  return (
+    <section className="paper-card p-6 sm:p-8">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <p className="eyebrow">Paycheck briefing</p>
+        <span className="text-xs text-muted-foreground">Through {formatDay(status.windowEnd)}</span>
+      </div>
+
+      <div className="mt-4 rounded-lg border-l-4 border-gold bg-gold/15 p-5">
+        <p className="text-xs font-medium uppercase tracking-wide text-ink">Plan incomplete</p>
+        <h2 className="mt-1 font-serif text-2xl leading-snug text-ink">
+          Debt-payment timing is incomplete, so this paycheck plan is not final.
+        </h2>
+        <p className="mt-2 text-sm leading-relaxed text-ink">
+          BudgetChek doesn't know when{" "}
+          {many ? "these required payments are" : "this required payment is"} due, so it can't tell
+          whether {many ? "they belong" : "it belongs"} before {formatDay(status.windowEnd)}:
+        </p>
+        <ul className="mt-3 space-y-1.5">
+          {status.unplaced.map((d) => (
+            <li key={d.id} className="flex items-baseline justify-between gap-3 text-sm text-ink">
+              <span>{d.name} minimum</span>
+              <span className="font-medium">{fmt(d.minPayment)}</span>
+            </li>
+          ))}
+          {many && (
+            <li className="flex items-baseline justify-between gap-3 border-t border-gold/50 pt-1.5 text-sm text-ink">
+              <span>Not yet placed in this paycheck</span>
+              <span className="font-medium">{fmt(status.unplacedTotal)}</span>
+            </li>
+          )}
+        </ul>
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-gold/50 pt-4">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-ink">Next focus</p>
+            <p className="mt-1 text-sm text-ink">{status.nextFocus}</p>
+          </div>
+          <Button asChild>
+            <Link to="/debt">Add due dates →</Link>
+          </Button>
+        </div>
+      </div>
+
+      {/* The partial calculation: kept visible (the ruling allows it) but
+          deliberately NOT the oversized figure and NOT labeled as the normal
+          remainder. */}
+      <div className="mt-5 rounded-lg border border-dashed border-border p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Partial calculation · known items only
+          </p>
+        </div>
+        <div className="mt-2">
+          <Footing status={status} state={state} userId={userId} />
+          <div className="mt-1 border-t border-border pt-2.5">
+            <CalcRow
+              label={short ? "Known-item shortfall (partial)" : "Known-item remainder (partial)"}
+              value={fmt(Math.abs(status.remainder))}
+              emphasize
+              muted
+            />
+          </div>
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+          Required debt minimums ({fmt(status.unplacedTotal)}) are not included yet, so this is{" "}
+          {short ? "not the full gap — it could be larger." : "not the final remainder."}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+/** A COMPLETE plan: every required obligation is either placed in this
+ *  window or has a known date outside it. This is the only state that shows
+ *  the normal "Estimated remaining". */
+function CompleteBriefing({
+  status,
+  state,
+  userId,
+}: {
+  status: Extract<PlanStatus, { kind: "healthy" | "shortfall" | "empty" }>;
+  state: MoneyState;
+  userId: string;
+}) {
+  const shortfall = status.kind === "shortfall";
+  const hasItems = status.keepItems.length > 0;
+  const hasBuffer = status.footing.some((r) => r.key === "buffer");
 
   return (
     <section className="paper-card p-6 sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="eyebrow">Paycheck briefing</p>
-        <span className="text-xs text-muted-foreground">Through {formatDay(window.end)}</span>
+        <span className="text-xs text-muted-foreground">Through {formatDay(status.windowEnd)}</span>
       </div>
 
       {/* The ONE decision amount. Deliberately the only oversized figure
-          on this page -- current balance, income, debt-free countdown,
-          and every other metric render smaller, below, and never in
-          this card. */}
+          on this page. The balance it starts from is the first line of THIS
+          calculation (with its own Update control) -- there is no second,
+          competing balance card. */}
       <div className="mt-4">
-        <CalcRow label="Balance" value={fmt(state.engineInput.account.currentBalance)} />
-        {hasItems && (
-          <CalcRow
-            label={`Keep available for ${itemCount} item${itemCount === 1 ? "" : "s"}`}
-            value={`−${fmt(funding.totalRequested)}`}
-          />
-        )}
-        {buffer > 0 && <CalcRow label="Buffer" value={`−${fmt(buffer)}`} />}
+        <Footing status={status} state={state} userId={userId} />
         <div className="mt-1 border-t border-border pt-2.5">
           <CalcRow
             label={shortfall ? "Short by" : "Estimated remaining"}
-            value={fmt(Math.abs(remaining))}
+            value={fmt(Math.abs(status.remainder))}
             emphasize
           />
         </div>
       </div>
 
-      {/* CEO review, "GATE 1 BOUNDED FINALIZATION" correction 1: Round-2
-          evidence showed the "Keep available" vs "Buffer" distinction
-          isn't self-evident from the labels alone. One compact line,
-          right beneath the calculation it explains -- no second card --
-          shown only when at least one of the two terms it defines is
-          actually on screen above. */}
-      {(hasItems || buffer > 0) && (
+      {(hasItems || hasBuffer) && (
         <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-          Keep available is for the items listed before payday. Buffer is the extra amount you chose
-          to leave untouched.
+          {hasItems && "Keep available is for the items listed before payday."}
+          {hasItems && hasBuffer && " "}
+          {hasBuffer && "Buffer is the extra amount you chose to leave untouched."}
         </p>
       )}
 
       {/* Trust boundary: never "safe to spend," never implied as a live
-          balance. Stated in the same breath as the number itself, not a
-          disclaimer buried below it. */}
+          balance. Stated in the same breath as the number itself. */}
       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
         {shortfall ? (
           <>Based on what you've entered — not a live bank balance.</>
@@ -159,40 +387,21 @@ function Briefing({ state }: { state: MoneyState }) {
         )}
       </p>
 
-      {/* What should I focus on next -- the engine's own honest sentence,
-          already carrying the unknown-debt-timing caveat when one
-          applies (see decision-engine.ts's buildFundingPlan).
-          CEO review, "GATE 1 BOUNDED FINALIZATION" correction 2: this
-          heading must not claim an action exists when the engine is
-          only reporting coverage/status. A real action -- something to
-          actually go do -- exists ONLY in the shortfall case (the
-          headline literally instructs "start with the one at the
-          cutoff line"). Every non-shortfall headline (fully covered,
-          nothing due, or either of those with the unknown-timing
-          caveat) is status/information, never an instruction, so it's
-          labeled "Plan status" instead -- never manufacturing an
-          action just to keep the old heading. */}
-      <div className={`mt-5 rounded-lg p-4 ${shortfall ? "bg-destructive/10" : "bg-secondary/60"}`}>
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          {shortfall ? "Next money move" : "Plan status"}
-        </p>
-        <p
-          className={`mt-1 text-sm leading-relaxed ${shortfall ? "text-destructive" : "text-ink"}`}
-        >
-          {snap.headline}
-        </p>
-      </div>
-
-      {snap.reservedTotal > 0 && (
-        <p className="mt-3 text-xs text-muted-foreground">
-          {fmt(snap.reservedTotal)} held in reserved funds, kept out of the balance above.
-        </p>
+      {shortfall ? (
+        <NextFocus heading="Next money move" tone="alert">
+          <p className="mt-1 text-sm leading-relaxed text-ink">{status.nextFocus}</p>
+        </NextFocus>
+      ) : (
+        <NextFocus heading="Next focus">
+          <p className="mt-1 text-sm font-medium leading-relaxed text-ink">{status.nextFocus}</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{status.status}</p>
+        </NextFocus>
       )}
     </section>
   );
 }
 
-export function PaycheckBriefing({ state }: { state: MoneyState }) {
+export function PaycheckBriefing({ state, userId }: { state: MoneyState; userId: string }) {
   if (state.loading) {
     return (
       <section className="paper-card p-6 sm:p-8">
@@ -201,8 +410,33 @@ export function PaycheckBriefing({ state }: { state: MoneyState }) {
       </section>
     );
   }
-  if (state.snapshot.missing.length > 0) {
-    return <SetupNeeded missing={state.snapshot.missing} />;
+
+  const source = balanceSource(state.profile, state.accounts);
+  const balanceAsOf =
+    source === "accounts"
+      ? oldestAsOf(spendableAccounts(state.accounts).map((a) => a.balance_as_of))
+      : (state.profile?.balance_as_of ?? null);
+  const status = derivePlanStatus(state.snapshot, state.engineInput, {
+    balanceSource: source,
+    balanceAsOf,
+  });
+
+  if (status.kind === "setup") {
+    return (
+      <SetupNeeded
+        status={status}
+        state={state}
+        userId={userId}
+        balance={
+          source === "none"
+            ? null
+            : { source, amount: state.engineInput.account.currentBalance, asOf: balanceAsOf }
+        }
+      />
+    );
   }
-  return <Briefing state={state} />;
+  if (status.kind === "incomplete") {
+    return <IncompleteBriefing status={status} state={state} userId={userId} />;
+  }
+  return <CompleteBriefing status={status} state={state} userId={userId} />;
 }

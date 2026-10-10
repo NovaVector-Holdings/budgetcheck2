@@ -1,7 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMoneyState } from "@/hooks/use-money-state";
 import { PaycheckBriefing } from "@/components/overview/paycheck-briefing";
-import { CashOnHandEditor } from "@/components/paycheck-cards";
 import { buildPayoffPlan, humanMonths } from "@/lib/payoff";
 import { fmt } from "@/lib/money";
 
@@ -41,32 +40,20 @@ function OverviewPage() {
         Hey{state.profile?.display_name ? ` ${state.profile.display_name}` : ""} — here's your
         paycheck briefing
       </h1>
-      {state.profile?.money_goal && (
-        <p className="mt-2 text-sm text-muted-foreground">
-          Your focus: <span className="font-medium text-ink">{state.profile.money_goal}</span>
-        </p>
-      )}
 
       {/* Gate 1 — the decision spine. Estimated remaining is the only
           oversized figure on the page; everything below is real,
-          useful, and deliberately smaller. */}
-      <div className="mt-8">
-        <PaycheckBriefing state={state} />
-      </div>
+          useful, and deliberately smaller.
 
-      {/* Gate 1 fix, discovered while building this exact page:
-          CashOnHandEditor's `editing` state initializes from `useState`
-          on first mount, when `profile` is always still null (the query
-          hasn't resolved yet) -- so it opened in "enter your balance"
-          mode even when a real balance was already on file, every
-          single page load. Not rendering it until the real state has
-          loaded means its own first mount sees the real profile value,
-          which is all the fix needs (CashOnHandEditor itself untouched). */}
-      {!state.loading && (
-        <div className="mt-4">
-          <CashOnHandEditor profile={state.profile} userId={user.id} />
-        </div>
-      )}
+          Gate 2 remediation: the balance and its Update control now live
+          INSIDE the briefing's calculation (there is no second "Current
+          balance" card repeating the same figure), and the free-text
+          "Your focus" line is gone -- the briefing carries the ONE next
+          focus, derived from the plan, so the page never states two
+          competing priorities. */}
+      <div className="mt-8">
+        <PaycheckBriefing state={state} userId={user.id} />
+      </div>
 
       {/* Secondary context -- kept because Round-2 evidence said people
           valued it, but never sized or positioned to compete with the

@@ -120,6 +120,24 @@ export const ACCOUNT_KINDS: { value: MmAccount["kind"]; label: string; spendable
 
 const spendableKinds = new Set(ACCOUNT_KINDS.filter((k) => k.spendable).map((k) => k.value));
 
+/** Where the engine's balance figure comes from -- the same precedence
+ *  buildEngineInput applies below, named so the Overview can tell which
+ *  control actually changes the number it shows, and can tell "no balance
+ *  on file" apart from a real $0 (buildEngineInput deliberately collapses
+ *  an absent balance to 0 for the engine). */
+export type BalanceSource = "accounts" | "profile" | "none";
+
+export function spendableAccounts(accounts: MmAccount[]): MmAccount[] {
+  return accounts.filter((a) => !a.archived && spendableKinds.has(a.kind));
+}
+
+export function balanceSource(profile: Profile | null, accounts: MmAccount[]): BalanceSource {
+  if (spendableAccounts(accounts).length > 0) return "accounts";
+  return profile?.cash_on_hand != null && Number.isFinite(Number(profile.cash_on_hand))
+    ? "profile"
+    : "none";
+}
+
 export function toPatternRules(rows: MmPatternRuleRow[]): PatternRule[] {
   return rows.map((r) => ({
     id: r.id,
