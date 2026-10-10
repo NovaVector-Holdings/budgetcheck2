@@ -35,11 +35,14 @@ function FutureExpensesPage() {
   const { data: expenses = [] } = useQuery({
     queryKey: ["expenses", user.id],
     queryFn: async () => {
-      const { data } = await supabase
+      // Shares ["expenses", id] with useMoneyState, so it must THROW on error: a swallowed []
+      // cached here would be read by the engine as "nothing is due".
+      const { data, error } = await supabase
         .from("planned_expenses")
         .select("*")
         .eq("archived", false)
         .order("due_date");
+      if (error) throw error;
       return (data ?? []) as PlannedExpense[];
     },
   });

@@ -10,6 +10,8 @@ import { ImportPanel } from "@/components/mm/import-panel";
 import { ArtifactShelf } from "@/components/mm/artifact-shelf";
 import { WeeklyCheckIn } from "@/components/mm/weekly-check-in";
 import { CoachSession } from "@/components/coach-session";
+import { MoneyDataGateNotice } from "@/components/money-data-gate";
+import { resolveGateView } from "@/lib/data-status";
 
 const TAB_KEYS = ["weekly", "monthly", "ask", "plans", "statements", "data"] as const;
 
@@ -100,6 +102,13 @@ function MoneyMeetingPage() {
   const state = useMoneyState(user.id);
   const meta = TABS.find((t) => t.key === tab)!;
   const snap = state.snapshot;
+  // Plans and Statements SAVE from rules / imports / artifacts, and the repair panel edits
+  // them, so those surfaces also wait on the extras. Everything else needs only the nine
+  // engine sources. The "data" tab is the repair surface: always reachable, with a notice.
+  const extrasNeeded = tab === "plans" || tab === "statements" || tab === "data";
+  const ready =
+    tab === "data" ||
+    resolveGateView(state, extrasNeeded ? state.extras : undefined).kind === "ready";
 
   return (
     <div>
@@ -124,9 +133,17 @@ function MoneyMeetingPage() {
         ))}
       </div>
 
+      {/* No figure, saved plan or write path renders until every dependency has loaded; a failed
+          read is an explicit "can't calculate" card, never an empty list read as a healthy plan. */}
+      <MoneyDataGateNotice
+        state={state}
+        extras={extrasNeeded ? state.extras : undefined}
+        repairSurface={tab === "data"}
+      />
+
       {/* Weekly and monthly are now full guided reviews with their own framing;
           the other tabs still share this one at-a-glance figure. */}
-      {tab !== "weekly" && tab !== "monthly" && (
+      {ready && tab !== "weekly" && tab !== "monthly" && (
         <div className="paper-card mt-5 p-5">
           <p className="text-sm text-ink">{snap.headline}</p>
           {snap.projection && snap.window && (
@@ -164,11 +181,11 @@ function MoneyMeetingPage() {
         </div>
       )}
 
-      {tab === "weekly" && (
+      {ready && tab === "weekly" && (
         <WeeklyCheckIn userId={user.id} state={state} onGoToData={() => setTab("data")} />
       )}
 
-      {tab === "monthly" && (
+      {ready && tab === "monthly" && (
         <CoachSession
           userId={user.id}
           monthlyIncome={state.profile?.monthly_income ?? null}
@@ -177,7 +194,7 @@ function MoneyMeetingPage() {
         />
       )}
 
-      {tab === "ask" && (
+      {ready && tab === "ask" && (
         <Assistant
           userId={user.id}
           snapshot={snap}
@@ -222,7 +239,7 @@ function MoneyMeetingPage() {
         />
       )}
 
-      {tab === "plans" && (
+      {ready && tab === "plans" && (
         <ArtifactShelf
           userId={user.id}
           engineInput={state.engineInput}
@@ -237,7 +254,7 @@ function MoneyMeetingPage() {
         />
       )}
 
-      {tab === "statements" && (
+      {ready && tab === "statements" && (
         <ImportPanel
           userId={user.id}
           rules={state.rules}
@@ -264,6 +281,7 @@ function MoneyMeetingPage() {
           expenses={state.expenses.map((e) => ({ id: e.id, name: e.name }))}
           debts={state.debts.map((d) => ({ id: d.id, name: d.name }))}
           goals={state.goals.map((g) => ({ id: g.id, name: g.name }))}
+          sourceStatus={{ ...state.sourceStatus, ...state.extras.sourceStatus }}
         />
       )}
     </div>

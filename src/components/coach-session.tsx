@@ -184,13 +184,16 @@ export function CoachSession({
         const now = Number(raw);
         const before = savedByGoal.get(g.id) ?? 0;
         if (!Number.isFinite(now) || now <= before) continue;
-        await supabase.from("savings_deposits").insert({
+        // Each write checks { error }: a silent failure here used to look like a saved review,
+        // and `before` comes from a deposits query that is now gated to be fully loaded.
+        const { error: depositError } = await supabase.from("savings_deposits").insert({
           user_id: userId,
           goal_id: g.id,
           amount: now - before,
           note: "Monthly review update",
           deposited_on: today(),
         });
+        if (depositError) throw depositError;
       }
       for (const d of debts) {
         const raw = balances[`debt:${d.id}`];
@@ -198,14 +201,19 @@ export function CoachSession({
         const now = Number(raw);
         if (!Number.isFinite(now) || now === Number(d.balance)) continue;
         const paid = Number(d.balance) - now;
-        await supabase.from("debts").update({ balance: now }).eq("id", d.id);
+        const { error: balanceError } = await supabase
+          .from("debts")
+          .update({ balance: now })
+          .eq("id", d.id);
+        if (balanceError) throw balanceError;
         if (paid > 0) {
-          await supabase.from("debt_payments").insert({
+          const { error: paymentError } = await supabase.from("debt_payments").insert({
             user_id: userId,
             debt_id: d.id,
             amount: paid,
             paid_on: today(),
           });
+          if (paymentError) throw paymentError;
         }
       }
 
@@ -239,7 +247,12 @@ export function CoachSession({
       setStep("intro");
       setTxns([]); setText(""); setBalances({}); setNotes("");
     },
-    onError: () => toast.error("Couldn't save the review."),
+    onError: () => {
+      toast.error("Couldn't save the review.");
+      // Earlier writes in the loop may have landed; refetch so the next figure matches the database.
+      qc.invalidateQueries({ queryKey: ["deposits", userId] });
+      qc.invalidateQueries({ queryKey: ["debts", userId] });
+    },
   });
 
   if (step === "intro") {

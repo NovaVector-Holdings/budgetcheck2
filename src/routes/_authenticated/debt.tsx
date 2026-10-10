@@ -67,7 +67,14 @@ function DebtPage() {
   const { data: debts = [] } = useQuery({
     queryKey: ["debts", user.id],
     queryFn: async () => {
-      const { data } = await supabase.from("debts").select("*").eq("archived", false);
+      // Shares ["debts", id] with useMoneyState: same ordering, and it must THROW on error --
+      // a swallowed [] cached here would be read by the engine as a real, empty debt list.
+      const { data, error } = await supabase
+        .from("debts")
+        .select("*")
+        .eq("archived", false)
+        .order("created_at");
+      if (error) throw error;
       return (data ?? []) as Debt[];
     },
   });
