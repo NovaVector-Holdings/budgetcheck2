@@ -45,10 +45,12 @@ export function ArtifactShelf({
       return { payload: buildCashFlow(engineInput, { debts, goals, savedByGoal }), sourceImportId: null };
     }
     if (kind === "payoff_schedule" || kind === "checklist") {
-      if (kind === "checklist" && !debts.length) {
+      // A paid-off row (balance <= 0) is not a debt to build a schedule for.
+      const activeDebts = debts.filter((d) => Number(d.balance) > 0);
+      if (kind === "checklist" && !activeDebts.length) {
         return { payload: checklistFromCashFlow(buildCashFlow(engineInput, { debts, goals, savedByGoal })), sourceImportId: null };
       }
-      const debt = [...debts].sort((a, b) => Number(b.apr ?? 0) - Number(a.apr ?? 0))[0];
+      const debt = [...activeDebts].sort((a, b) => Number(b.apr ?? 0) - Number(a.apr ?? 0))[0];
       if (!debt) return "Add a debt on the Debt page first, and this builds itself from that balance.";
       const schedule = buildPayoffSchedule({
         debt,

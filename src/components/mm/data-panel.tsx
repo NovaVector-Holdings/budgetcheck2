@@ -12,6 +12,7 @@ import {
   type MmSpendingCap,
 } from "@/lib/mm";
 import { checkCap, tapReserved, FUNDING_TIERS } from "@/lib/decision-engine";
+import type { EngineSourceKey, ExtraSourceKey, SourceState } from "@/lib/data-status";
 import { CLASS_META, type PatternClass } from "@/lib/pattern-rules";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +33,12 @@ interface Props {
   expenses: RefOption[];
   debts: RefOption[];
   goals: RefOption[];
+  /**
+   * Per-source load state from useMoneyState. This panel is the repair surface, so it
+   * stays usable while a source is down, but a list that did not load must say so
+   * instead of reading as "none yet" (and Spendable must not read as $0.00).
+   */
+  sourceStatus?: Partial<Record<EngineSourceKey | ExtraSourceKey, SourceState>>;
 }
 
 const REF_KIND_LABEL: Record<RefKind, string> = {
@@ -40,6 +47,29 @@ const REF_KIND_LABEL: Record<RefKind, string> = {
   goal: "A savings goal",
   custom: "Something else",
 };
+
+/** Which loaded list backs each reference kind in the priorities picker. */
+const REF_SOURCE: Record<RefKind, EngineSourceKey> = {
+  expense: "expenses",
+  debt: "debts",
+  goal: "goals",
+  custom: "profile",
+};
+
+/** Replaces a blank state / total for a list that is still loading or failed to load. */
+function SourceNotice({ state, what }: { state: SourceState | undefined; what: string }) {
+  if (!state || state === "ready") return null;
+  return (
+    <p
+      className="mt-3 text-sm text-muted-foreground"
+      role={state === "unavailable" ? "alert" : "status"}
+    >
+      {state === "loading"
+        ? `Loading ${what}…`
+        : `Couldn't load ${what}, so what you've saved here isn't shown. Try again before adding anything, so nothing gets entered twice.`}
+    </p>
+  );
+}
 
 function Section({
   title,
@@ -69,7 +99,9 @@ export function DataPanel({
   expenses,
   debts,
   goals,
+  sourceStatus,
 }: Props) {
+  const ready = (k: EngineSourceKey | ExtraSourceKey) => (sourceStatus?.[k] ?? "ready") === "ready";
   const qc = useQueryClient();
   const readShot = useServerFn(readBalanceScreenshot);
   const shotRef = useRef<HTMLInputElement>(null);
@@ -216,6 +248,7 @@ export function DataPanel({
     debt: debts,
     goal: goals,
   };
+  const refListReady = ready(REF_SOURCE[override.refKind]);
 
   const addOverride = useMutation({
     mutationFn: async () => {
@@ -300,6 +333,7 @@ export function DataPanel({
         title="Your accounts"
         blurb="Add each account by hand — checking, savings, cards, cash. Everyday accounts and cash are what 'available' is counted from; savings and cards are shown but held out of it."
       >
+        <SourceNotice state={sourceStatus?.accounts} what="your accounts" />
         {accounts.length > 0 && (
           <ul className="mt-4 divide-y divide-border rounded-lg border border-border">
             {accounts.map((a) => (
@@ -332,10 +366,12 @@ export function DataPanel({
             ))}
           </ul>
         )}
-        <p className="mt-3 text-sm text-muted-foreground">
-          Spendable across {spendable.length} account{spendable.length === 1 ? "" : "s"}:{" "}
-          <span className="font-medium text-ink">{fmt(spendableTotal)}</span>
-        </p>
+        {ready("accounts") && (
+          <p className="mt-3 text-sm text-muted-foreground">
+            Spendable across {spendable.length} account{spendable.length === 1 ? "" : "s"}:{" "}
+            <span className="font-medium text-ink">{fmt(spendableTotal)}</span>
+          </p>
+        )}
 
         <div className="mt-4 grid gap-3 sm:grid-cols-4">
           <div className="space-y-1.5 sm:col-span-2">
@@ -419,6 +455,7 @@ export function DataPanel({
         title="Money you've set aside"
         blurb="Reserved money is held out of every 'available' figure until you explicitly use it. If you do use some, putting it back becomes first in line on your next payday — the same priority as rent."
       >
+        <SourceNotice state={sourceStatus?.reserved} what="your set-aside money" />
         {reserved.length > 0 && (
           <ul className="mt-4 space-y-2">
             {reserved.map((r) => {
@@ -505,6 +542,7 @@ export function DataPanel({
         title="Spending caps"
         blurb="A cap is a ceiling you choose, not the average you happen to spend. If the card behind a cap allows more than the cap, that gap is flagged — you can't overspend a limit that doesn't exist."
       >
+        <SourceNotice state={sourceStatus?.caps} what="your spending caps" />
         {caps.length > 0 && (
           <ul className="mt-4 space-y-2">
             {caps.map((c) => {
@@ -605,6 +643,7 @@ export function DataPanel({
         title="How charges get read"
         blurb="Uploads are read from the raw description, not your bank's category, because bank categories are often wrong. Add your own phrases here and every future upload reads them your way."
       >
+        <SourceNotice state={sourceStatus?.rules} what="your statement rules" />
         {rules.length > 0 && (
           <ul className="mt-4 space-y-2">
             {rules.map((r) => (
@@ -668,6 +707,7 @@ export function DataPanel({
         title="What you said matters most"
         blurb="Move a bill, debt, or goal up the funding order by hand, and say why — that reason is shown wherever the order appears, including to the assistant."
       >
+        <SourceNotice state={sourceStatus?.overrides} what="your priorities" />
         {overrides.length > 0 && (
           <ul className="mt-4 space-y-2">
             {overrides.map((o) => (
@@ -744,7 +784,13 @@ export function DataPanel({
                   </option>
                 ))}
               </select>
-              {overrideSource[override.refKind].length === 0 && (
+              {overrideSource[override.refKind].length === 0 && !refListReady && (
+                <p className="text-xs text-muted-foreground">
+                  These haven't loaded, so the list above may be incomplete. Try again before
+                  choosing one.
+                </p>
+              )}
+              {overrideSource[override.refKind].length === 0 && refListReady && (
                 <p className="text-xs text-muted-foreground">
                   You don't have any of these yet — add one first, or choose "Something else" to
                   name it directly.

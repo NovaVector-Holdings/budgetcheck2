@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { fmt, type Debt } from "@/lib/money";
-import { buildPayoffPlan, humanMonths, type PayoffPlan } from "@/lib/payoff";
+import { buildPayoffPlan, humanMonths, payoffReasonCopy, type PayoffPlan } from "@/lib/payoff";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,15 +30,7 @@ function Chart({ plan }: { plan: PayoffPlan }) {
 }
 
 function Missing({ reason }: { reason?: string }) {
-  const copy =
-    reason === "no-debts"
-      ? "No debts listed, so there's nothing to pay off — that's the goal, reached."
-      : reason === "no-payment"
-        ? "Add a minimum monthly payment to each debt (or an extra amount below) and your date appears."
-        : reason === "payment-too-small"
-          ? "Right now the payments don't quite cover the monthly interest, so the balance wouldn't fall. Adding a little extra changes that."
-          : "These numbers stretch past 50 years, so no date is shown. Try adding an extra monthly amount.";
-  return <p className="mt-3 text-sm text-muted-foreground">{copy}</p>;
+  return <p className="mt-3 text-sm text-muted-foreground">{payoffReasonCopy(reason)}</p>;
 }
 
 /** The headline promise: a real date, built only from the debts you entered. */

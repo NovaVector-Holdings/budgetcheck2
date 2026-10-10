@@ -136,8 +136,10 @@ export function buildPaycheckPlan(args: {
     .map((e) => ({ id: e.id, name: e.name, amount: round2(Number(e.amount)), dueDate: e.due_date }))
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
-  // Debt minimums have no due date in this app, so they are deliberately NOT
-  // folded into the holdback — that would be a guess. They're reported instead.
+  // This function predates debts.due_day and no live route calls it (the live
+  // plan is decision-engine.ts, fed by mm.ts). Debt minimums are deliberately
+  // NOT folded into the holdback here and due_day is NOT wired in: a second,
+  // divergent plan calculator is exactly what Option C must not create.
   const undatedDebtMinimums = round2(
     debts.filter((d) => !d.archived && Number(d.minimum_payment ?? 0) > 0).reduce((s, d) => s + Number(d.minimum_payment), 0),
   );

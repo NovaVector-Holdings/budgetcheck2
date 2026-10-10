@@ -72,7 +72,10 @@ export function recommendLesson(args: RecommendArgs): { lesson: Lesson; because:
   // continues to any genuinely matching rule below, otherwise the function
   // returns null.
 
-  const highAprDebt = args.debts.find((d) => Number(d.apr ?? 0) >= HIGH_APR);
+  // A paid-off row (balance <= 0) is not a debt charging interest.
+  const highAprDebt = args.debts.find(
+    (d) => Number(d.balance) > 0 && Number(d.apr ?? 0) >= HIGH_APR,
+  );
   if (highAprDebt) {
     const lesson = byId("investing-roadmap");
     if (lesson) {

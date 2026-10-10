@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { fmt } from "@/lib/money";
+import { assistantDebtContext } from "@/lib/due-day";
 import { formatDay } from "@/lib/decision-engine";
 import { useMoneyState } from "@/hooks/use-money-state";
 import { Assistant } from "@/components/mm/assistant";
@@ -9,6 +10,8 @@ import { ImportPanel } from "@/components/mm/import-panel";
 import { ArtifactShelf } from "@/components/mm/artifact-shelf";
 import { WeeklyCheckIn } from "@/components/mm/weekly-check-in";
 import { CoachSession } from "@/components/coach-session";
+import { MoneyDataGateNotice } from "@/components/money-data-gate";
+import { resolveGateView } from "@/lib/data-status";
 
 const TAB_KEYS = ["weekly", "monthly", "ask", "plans", "statements", "data"] as const;
 
@@ -99,6 +102,22 @@ function MoneyMeetingPage() {
   const state = useMoneyState(user.id);
   const meta = TABS.find((t) => t.key === tab)!;
   const snap = state.snapshot;
+  // The lowest-point projection runs over planned bills and income only; a debt minimum is never
+  // in it, so say so whenever there is an active debt (balance > 0) rather than imply it is.
+  const hasActiveDebt = state.engineInput.obligations.debts.some(
+    (d) => Number.isFinite(d.balance) && d.balance > 0,
+  );
+  // Plans and Statements SAVE from rules / imports / artifacts, and the repair panel edits
+  // them, so those surfaces also wait on the extras. Everything else needs only the nine
+  // engine sources. The "data" tab is the repair surface: always reachable, with a notice.
+  const extrasNeeded = tab === "plans" || tab === "statements" || tab === "data";
+  const ready =
+    tab === "data" ||
+    resolveGateView(state, extrasNeeded ? state.extras : undefined).kind === "ready";
+  // The at-a-glance card PRINTS a headline and a projected balance, so it needs the engine
+  // sources resolved on EVERY tab -- including the repair tab, whose panel stays reachable
+  // while loading or failed but must never sit under a figure built from empty defaults.
+  const figuresReady = resolveGateView(state).kind === "ready";
 
   return (
     <div>
@@ -123,9 +142,17 @@ function MoneyMeetingPage() {
         ))}
       </div>
 
+      {/* No figure, saved plan or write path renders until every dependency has loaded; a failed
+          read is an explicit "can't calculate" card, never an empty list read as a healthy plan. */}
+      <MoneyDataGateNotice
+        state={state}
+        extras={extrasNeeded ? state.extras : undefined}
+        repairSurface={tab === "data"}
+      />
+
       {/* Weekly and monthly are now full guided reviews with their own framing;
           the other tabs still share this one at-a-glance figure. */}
-      {tab !== "weekly" && tab !== "monthly" && (
+      {figuresReady && ready && tab !== "weekly" && tab !== "monthly" && (
         <div className="paper-card mt-5 p-5">
           <p className="text-sm text-ink">{snap.headline}</p>
           {snap.projection && snap.window && (
@@ -138,7 +165,7 @@ function MoneyMeetingPage() {
               {snap.reservedTotal > 0
                 ? `, with ${fmt(snap.reservedTotal)} held back and not counted`
                 : ""}
-              .
+              {hasActiveDebt ? ", before any debt minimums" : ""}.
             </p>
           )}
           {snap.missing.length > 0 && (
@@ -163,11 +190,11 @@ function MoneyMeetingPage() {
         </div>
       )}
 
-      {tab === "weekly" && (
+      {ready && tab === "weekly" && (
         <WeeklyCheckIn userId={user.id} state={state} onGoToData={() => setTab("data")} />
       )}
 
-      {tab === "monthly" && (
+      {ready && tab === "monthly" && (
         <CoachSession
           userId={user.id}
           monthlyIncome={state.profile?.monthly_income ?? null}
@@ -176,7 +203,7 @@ function MoneyMeetingPage() {
         />
       )}
 
-      {tab === "ask" && (
+      {ready && tab === "ask" && (
         <Assistant
           userId={user.id}
           snapshot={snap}
@@ -206,18 +233,10 @@ function MoneyMeetingPage() {
               due: e.due_date,
               paid: e.paid,
             })),
-            debts: state.debts.map((d) => ({
-              name: d.name,
-              balance: Number(d.balance),
-              apr: d.apr,
-              minimum: d.minimum_payment,
-              // Debts have no due-date column at all today -- always
-              // null, honestly reflecting a permanently-missing field
-              // (not "not yet loaded"). This is what makes the
-              // assistant's "add_missing_due_date" action meaningfully
-              // real for a debt: the due date genuinely isn't on file.
-              due: null,
-            })),
+            // Same resolver and the SAME todayIso the engine input was built with
+            // (Option C): a due day the engine placed is the due date the assistant
+            // states, and a debt with no usable due day stays null (unknown).
+            debts: assistantDebtContext(state.debts, state.engineInput.todayIso),
             goals: state.goals.map((g) => ({
               name: g.name,
               target: Number(g.target_amount),
@@ -229,7 +248,7 @@ function MoneyMeetingPage() {
         />
       )}
 
-      {tab === "plans" && (
+      {ready && tab === "plans" && (
         <ArtifactShelf
           userId={user.id}
           engineInput={state.engineInput}
@@ -244,7 +263,7 @@ function MoneyMeetingPage() {
         />
       )}
 
-      {tab === "statements" && (
+      {ready && tab === "statements" && (
         <ImportPanel
           userId={user.id}
           rules={state.rules}
@@ -271,6 +290,7 @@ function MoneyMeetingPage() {
           expenses={state.expenses.map((e) => ({ id: e.id, name: e.name }))}
           debts={state.debts.map((d) => ({ id: d.id, name: d.name }))}
           goals={state.goals.map((g) => ({ id: g.id, name: g.name }))}
+          sourceStatus={{ ...state.sourceStatus, ...state.extras.sourceStatus }}
         />
       )}
     </div>

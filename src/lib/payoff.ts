@@ -156,3 +156,16 @@ export function humanMonths(months: number) {
   if (!m) return `${y} year${y === 1 ? "" : "s"}`;
   return `${y} year${y === 1 ? "" : "s"}, ${m} month${m === 1 ? "" : "s"}`;
 }
+
+/** Plain-words explanation for a payoff plan that can't produce a date. One
+ *  copy, shared by the Debt page and the Overview card, so the two never say
+ *  different things about the same plan. */
+export function payoffReasonCopy(reason?: string): string {
+  return reason === "no-debts"
+    ? "No debts listed, so there's nothing to pay off — that's the goal, reached."
+    : reason === "no-payment"
+      ? "Add a minimum monthly payment to each debt (or an extra amount below) and your date appears."
+      : reason === "payment-too-small"
+        ? "Right now the payments don't quite cover the monthly interest, so the balance wouldn't fall. Adding a little extra changes that."
+        : "These numbers stretch past 50 years, so no date is shown. Try adding an extra monthly amount.";
+}

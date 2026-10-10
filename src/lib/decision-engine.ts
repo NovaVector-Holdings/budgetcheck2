@@ -28,6 +28,13 @@
 // separately via FundingPlan.debtsWithUnknownTiming, so a "fully
 // covered"/"no shortfall" claim built on top of this can be qualified
 // honestly rather than implying timing was evaluated when it wasn't.
+//
+// SME/CEO return (binding), debt completeness: a debt may now carry a
+// monthly due day (resolved to ONE ISO date upstream, never stored as a
+// one-off date), so "unknown timing" means that day isn't on file. The
+// same rule now covers the minimum itself and paid-off debts: see
+// classifyDebt, FundingPlan.debtsWithUnknownMinimum and
+// EngineSnapshot.planComplete.
 
 export type Cadence = "weekly" | "biweekly" | "semimonthly" | "monthly" | "irregular";
 
@@ -53,6 +60,11 @@ export interface ReservedFund {
 export interface AccountState {
   /** Sum of the spendable accounts the person entered, minus nothing. */
   currentBalance: number;
+  /** False when the balance was never entered and `currentBalance` is only a
+   *  placeholder 0. Defaults to true. When false, computeSnapshot reports the
+   *  balance as missing, so neither `complete` nor `planComplete` can claim a
+   *  finished plan on a balance nobody gave us. */
+  balanceKnown?: boolean;
   pendingOutflows: PendingFlow[];
   pendingInflows: PendingFlow[];
   reservedFunds: ReservedFund[];
@@ -176,14 +188,72 @@ const hasUsableDueDate = (iso: string | null | undefined): iso is string => {
   return new Date(ms).toISOString().slice(0, 10) === iso;
 };
 
-// A real, current-cycle minimum payment must be a genuine, finite,
-// positive number -- Infinity satisfies `> 0` in JS but is not a real
-// dollar amount and poisons totalRequested/shortfall arithmetic into
-// "$∞ short" if admitted.
-const isFinitePositive = (n: unknown): boolean => {
-  const v = Number(n ?? 0);
-  return Number.isFinite(v) && v > 0;
+// ---------------------------------------------------------------------------
+// Debt classification -- the ONE place a debt's role in the plan is decided
+// ---------------------------------------------------------------------------
+
+// SME/CEO return (binding), debt completeness: before this, a debt with a
+// null/0/NaN/Infinity minimum fell into NO bucket and silently vanished
+// from the plan, while a PAID-OFF debt (balance <= 0) either held the plan
+// incomplete (no date) or entered `items` as a required payment (date in
+// window). Every debt is now classified exactly once, by this function,
+// and buildFundingPlan builds EVERY bucket from it so the buckets cannot
+// drift apart.
+export type DebtClass =
+  | "paid_off"
+  | "unknown_minimum"
+  | "no_payment_required"
+  | "unknown_timing"
+  | "due_in_window"
+  | "due_outside_window";
+
+/** A minimum payment's real meaning. An explicit 0 is the person saying "no
+ *  payment is required" -- that is KNOWN, not missing, so it never makes the
+ *  plan incomplete (CEO ruling). null/undefined/blank/NaN/Infinity/negative
+ *  is not a dollar amount at all -- the minimum is UNKNOWN (Infinity satisfies
+ *  `> 0` in JS but would poison totalRequested/shortfall into "$∞ short"). */
+const minimumKind = (n: unknown): "unknown" | "none" | "positive" => {
+  if (n == null) return "unknown";
+  if (typeof n === "string" && n.trim() === "") return "unknown";
+  const v = Number(n);
+  if (!Number.isFinite(v) || v < 0) return "unknown";
+  return v === 0 ? "none" : "positive";
 };
+
+/**
+ * Order matters and is the ruling: (1) a debt with a real balance <= 0 is
+ * paid off and is NOT a required current payment, whatever its other
+ * fields say; (2) an ACTIVE debt with an unknown minimum is unknown_minimum
+ * -- even when a due date is known and outside the window (the simple,
+ * conservative rule); (3) an explicit $0 minimum is no_payment_required;
+ * (4) a real minimum with no usable due date is unknown_timing; (5) the
+ * rest are placed in or out of the window. A non-finite or non-numeric
+ * balance is never read as paid off -- it stays ACTIVE and fails closed.
+ */
+export function classifyDebt(d: DebtObligation, inWindow: (iso: string) => boolean): DebtClass {
+  if (typeof d.balance === "number" && Number.isFinite(d.balance) && d.balance <= 0)
+    return "paid_off";
+  const kind = minimumKind(d.minPayment);
+  if (kind === "unknown") return "unknown_minimum";
+  if (kind === "none") return "no_payment_required";
+  if (!hasUsableDueDate(d.dueDate)) return "unknown_timing";
+  return inWindow(d.dueDate) ? "due_in_window" : "due_outside_window";
+}
+
+/** Active debts whose minimum payment is unknown. Needs no funding plan and
+ *  no window, so the Overview can use it even when funding is null (no
+ *  payday yet) -- one definition, shared with buildFundingPlan. */
+export function debtsMissingMinimum(
+  debts: DebtObligation[],
+): { id: string; creditor: string; balance: number }[] {
+  return debts
+    .filter((d) => classifyDebt(d, () => false) === "unknown_minimum")
+    .map((d) => ({
+      id: d.id,
+      creditor: d.creditor,
+      balance: Number.isFinite(Number(d.balance)) ? round2(Number(d.balance)) : 0,
+    }));
+}
 
 /** Projects the next deposit date from a cadence when the person gave us one. */
 export function projectNextDeposit(cycle: PayCycle, todayIso: string): string | null {
@@ -389,6 +459,14 @@ export interface FundingPlan {
    *  field is how that stays visible rather than silently disappearing
    *  into an unqualified "no shortfall". See buildFundingPlan below. */
   debtsWithUnknownTiming: { id: string; creditor: string; minPayment: number }[];
+  /** ACTIVE debts (balance > 0) whose minimum payment is not on file at all
+   *  -- null/undefined/NaN/Infinity/negative. They are never counted as
+   *  zero and never dropped: an unknown minimum means the paycheck plan
+   *  is INCOMPLETE, because a required payment may exist that BudgetChek
+   *  cannot size. An explicit $0 minimum is NOT here (the person said no
+   *  payment is required -- see classifyDebt). Paid-off debts are not
+   *  here either. */
+  debtsWithUnknownMinimum: { id: string; creditor: string; balance: number }[];
 }
 
 /**
@@ -424,21 +502,26 @@ export function buildFundingPlan(input: EngineInput, window: Window): FundingPla
 
   // Debt minimums sit in tier 4, ordered by APR descending inside the
   // tier -- but ONLY when a real due date puts them in this window,
-  // exactly like bills above. Unknown timing (dueDate === null, true
-  // for every debt today -- there is no persistent due-date field on
-  // the debts table at all) must never be silently treated as "due this
+  // exactly like bills above. Unknown timing (dueDate === null -- a debt
+  // whose monthly due day hasn't been entered, or one this cycle can't
+  // resolve) must never be silently treated as "due this
   // cycle": that would let an unverified obligation drive shortfall/
   // no-shortfall for a debt BudgetChek genuinely cannot place in this
   // window without guessing. A real due date that's simply outside the
   // window is a different, unproblematic case -- correctly excluded
   // either way, but not because it was unknown.
-  const debtsWithUnknownTiming = obligations.debts
-    .filter((d) => isFinitePositive(d.minPayment) && !hasUsableDueDate(d.dueDate))
-    .map((d) => ({ id: d.id, creditor: d.creditor, minPayment: round2(Number(d.minPayment)) }));
-  const mins = obligations.debts
-    .filter(
-      (d) => isFinitePositive(d.minPayment) && hasUsableDueDate(d.dueDate) && inWindow(d.dueDate),
-    )
+  const classified = obligations.debts.map((d) => ({ d, cls: classifyDebt(d, inWindow) }));
+  const debtsWithUnknownTiming = classified
+    .filter((c) => c.cls === "unknown_timing")
+    .map(({ d }) => ({ id: d.id, creditor: d.creditor, minPayment: round2(Number(d.minPayment)) }));
+  // Unknown minimum is its own bucket (never an item, never a zero): the
+  // plan is incomplete until the minimum is entered. See classifyDebt.
+  const debtsWithUnknownMinimum = debtsMissingMinimum(
+    classified.filter((c) => c.cls === "unknown_minimum").map((c) => c.d),
+  );
+  const mins = classified
+    .filter((c) => c.cls === "due_in_window")
+    .map((c) => c.d)
     .sort((a, b) => Number(b.apr ?? 0) - Number(a.apr ?? 0));
   for (const d of mins) {
     const ov = overrideFor("debt", d.id);
@@ -535,23 +618,33 @@ export function buildFundingPlan(input: EngineInput, window: Window): FundingPla
   const hasUnknownTiming = debtsWithUnknownTiming.length > 0;
   const unknownTimingNote =
     " Debt-minimum timing is still incomplete, so this does not confirm every required payment for this paycheck window.";
+  // SME/CEO return (binding): an active debt whose minimum is not on file is
+  // the same class of gap as unknown timing -- a required payment may exist
+  // that is not in the arithmetic above -- so the sentence must say so. Every
+  // existing string is byte-identical when this list is empty.
+  const hasUnknownMinimum = debtsWithUnknownMinimum.length > 0;
+  const alsoMinimumNote = " A debt's minimum payment is also not on file.";
 
   let takeaway: string;
   if (!items.length) {
     takeaway = hasUnknownTiming
-      ? "No item with a known due date is currently scheduled in this paycheck window. Debt-minimum timing is incomplete, so a required minimum may still belong in this period."
-      : `Nothing you've entered is due between ${formatDay(window.start)} and ${formatDay(window.end)}. That means nothing you've told us about — not that nothing is coming.`;
+      ? `No item with a known due date is currently scheduled in this paycheck window. Debt-minimum timing is incomplete, so a required minimum may still belong in this period.${hasUnknownMinimum ? alsoMinimumNote : ""}`
+      : hasUnknownMinimum
+        ? "No item with a known due date is currently scheduled in this paycheck window. A debt's minimum payment is not on file, so a required payment may still belong in this period."
+        : `Nothing you've entered is due between ${formatDay(window.start)} and ${formatDay(window.end)}. That means nothing you've told us about — not that nothing is coming.`;
   } else if (cutoffIndex === -1) {
     takeaway = hasUnknownTiming
-      ? `The items with known timing due before ${formatDay(window.end)} are covered, with ${money(pool)} left after your buffer.${unknownTimingNote}`
-      : `Everything due before ${formatDay(window.end)} is covered, with ${money(pool)} left after your buffer.`;
+      ? `The items with known timing due before ${formatDay(window.end)} are covered, with ${money(pool)} left after your buffer.${unknownTimingNote}${hasUnknownMinimum ? alsoMinimumNote : ""}`
+      : hasUnknownMinimum
+        ? `The items BudgetChek can place before ${formatDay(window.end)} are covered, with ${money(pool)} left after your buffer. A required debt's minimum payment is not on file, so this does not confirm every required payment for this paycheck window.`
+        : `Everything due before ${formatDay(window.end)} is covered, with ${money(pool)} left after your buffer.`;
   } else {
     // A real, known-timing shortfall is reported exactly as before --
     // never hidden, never adjusted for the unknown-timing debt (its
     // amount is never added to this arithmetic; BudgetChek does not
     // guess when it's due), only qualified with an honest caveat.
     const first = items[cutoffIndex];
-    takeaway = `Your money covers everything down to ${first.label}, then runs out — ${money(shortfall)} short across ${items.length - cutoffIndex} item${items.length - cutoffIndex === 1 ? "" : "s"}. Start with the one at the cutoff line, not the whole gap.${hasUnknownTiming ? " Debt-minimum timing is also incomplete, so a required minimum may still belong in this period beyond what's shown here." : ""}`;
+    takeaway = `Your money covers everything down to ${first.label}, then runs out — ${money(shortfall)} short across ${items.length - cutoffIndex} item${items.length - cutoffIndex === 1 ? "" : "s"}. Start with the one at the cutoff line, not the whole gap.${hasUnknownTiming ? " Debt-minimum timing is also incomplete, so a required minimum may still belong in this period beyond what's shown here." : ""}${hasUnknownMinimum ? (hasUnknownTiming ? alsoMinimumNote : " A debt's minimum payment is also not on file, so a required payment may still belong in this period beyond what's shown here.") : ""}`;
   }
 
   return {
@@ -562,6 +655,7 @@ export function buildFundingPlan(input: EngineInput, window: Window): FundingPla
     shortfall,
     takeaway,
     debtsWithUnknownTiming,
+    debtsWithUnknownMinimum,
   };
 }
 
@@ -820,7 +914,16 @@ export interface MissingInput {
 }
 
 export interface EngineSnapshot {
+  /** SETUP ONLY: the balance, next payday and cadence are on file. It says
+   *  nothing about debts -- a debt with an unknown minimum or unknown timing
+   *  leaves this true. It is NOT the plan-complete truth; use `planComplete`
+   *  for that (two locked proofs pin this meaning, so it must not widen). */
   complete: boolean;
+  /** The ONE plan-complete truth: setup is complete AND no active debt has an
+   *  unknown minimum or unknown timing. Fixed here at the source so the
+   *  Overview's PLAN INCOMPLETE and the assistant's "the plan is complete"
+   *  can never disagree. False whenever funding could not be computed. */
+  planComplete: boolean;
   missing: MissingInput[];
   todayIso: string;
   window: Window | null;
@@ -834,7 +937,13 @@ export interface EngineSnapshot {
 /** One call the UI and the assistant both use. */
 export function computeSnapshot(input: EngineInput): EngineSnapshot {
   const missing: MissingInput[] = [];
-  if (!input.account.currentBalance && input.account.currentBalance !== 0) {
+  // `balanceKnown: false` is the caller saying the balance was never actually
+  // entered (it collapses an absent balance to 0 upstream, which would read
+  // as a real, known $0). Treat it exactly like a missing balance.
+  if (
+    input.account.balanceKnown === false ||
+    (!input.account.currentBalance && input.account.currentBalance !== 0)
+  ) {
     missing.push({
       field: "balance",
       label: "What's in your spending account right now",
@@ -860,6 +969,7 @@ export function computeSnapshot(input: EngineInput): EngineSnapshot {
   if (!next) {
     return {
       complete: false,
+      planComplete: false,
       missing,
       todayIso: input.todayIso,
       window: null,
@@ -878,6 +988,10 @@ export function computeSnapshot(input: EngineInput): EngineSnapshot {
 
   return {
     complete: missing.length === 0,
+    planComplete:
+      missing.length === 0 &&
+      funding.debtsWithUnknownTiming.length === 0 &&
+      funding.debtsWithUnknownMinimum.length === 0,
     missing,
     todayIso: input.todayIso,
     window,

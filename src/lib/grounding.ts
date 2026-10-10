@@ -204,9 +204,19 @@ import { z } from "zod";
 //    non-empty, so a "no shortfall"/"no action needed" claim never
 //    implies debt timing was evaluated when it wasn't. A new ActionCode,
 //    debt_timing_unavailable, replaces add_missing_due_date for debts
-//    specifically (which is now bill-only) -- there is no UI field to
-//    "add" a debt due date to today, so recommending that would itself
-//    be dishonest.
+//    specifically (which is now bill-only). When this was written a debt
+//    had no due-date field at all, so telling someone to "add" one would
+//    have been dishonest; a debt now carries a monthly due day on the
+//    Debt page, so debt_timing_unavailable's rendering names that remedy.
+//    The add_missing_due_date gate itself is deliberately left unchanged
+//    here (a separate ruling).
+//  - PLAN COMPLETENESS, ONE TRUTH (SME/CEO return, binding):
+//    plan_complete/plan_incomplete used to read snapshot.complete, which
+//    is SETUP ONLY (balance/payday/cadence) and says nothing about
+//    debts. They now read planIsComplete, which also requires the
+//    engine's own snapshot.planComplete and EMPTY unknown-timing AND
+//    unknown-minimum lists -- the same semantics the Overview's PLAN
+//    INCOMPLETE shows, fixed at the source in decision-engine.ts.
 //  - ACTION/PLAN ALIGNMENT: hold_for_due_item and pay_required_minimum
 //    now also require the target's OWN funding-plan line item to
 //    actually be "funded" (isFundingItemFunded) -- a structurally valid,
@@ -438,7 +448,6 @@ interface FieldMeta {
 }
 
 const SNAPSHOT_PATHS: Record<string, FieldMeta> = {
-  "snapshot.complete": { type: "boolean", protected: false, derivable: false },
   "snapshot.todayIso": { type: "date", protected: false, derivable: false },
   "snapshot.window.start": { type: "date", protected: false, derivable: false },
   "snapshot.window.end": { type: "date", protected: false, derivable: false },
@@ -488,9 +497,9 @@ const SNAPSHOT_LABELS: Record<string, string> = {
 
 /** Entity kind -> field -> meta. Entities are addressed by their exact,
  *  real name -- the same name string the model is shown in the
- *  snapshot, never a synthetic id it has to guess. `due` on debt is
- *  always null today -- there is no due-date column on the debts table
- *  at all, a genuine, permanent absence, not "not yet loaded". */
+ *  snapshot, never a synthetic id it has to guess. `due` on debt is the
+ *  engine's RESOLVED next occurrence of the debt's monthly due day (or
+ *  null when no due day is on file) -- never a stored one-off date. */
 const ENTITY_FIELDS: Record<string, Record<string, FieldMeta>> = {
   debt: {
     balance: { type: "money", protected: false, derivable: true },
@@ -1140,7 +1149,10 @@ function resolveStateClaim(claim: Claim, payload: Record<string, unknown>): Clai
     }
     case "plan_complete":
     case "plan_incomplete": {
-      const isComplete = snap.complete === true;
+      // ONE semantic truth: the engine's own planComplete (setup on file AND
+      // every active debt has a known minimum and a known due day), not the
+      // setup-only snapshot.complete. See planIsComplete.
+      const isComplete = planIsComplete(payload);
       if (code === "plan_complete") {
         if (!isComplete)
           return { ok: false, reason: "claimed the plan is complete, but it is not" };
@@ -1171,6 +1183,7 @@ function resolveStateClaim(claim: Claim, payload: Record<string, unknown>): Clai
       // comment) so a malformed entry in the underlying array can't
       // silently suppress or undercount this caveat.
       const unknownCount = debtsWithUnknownTimingCount(payload);
+      const unknownMinimumCount = debtsWithUnknownMinimumCount(payload);
       // Deliberately phrased WITHOUT a leading "<N> debt(s)" count -- that
       // exact shape is what checkEntityCountClaims's fail-safe treats as
       // a claim about the TOTAL number of debts on file, which this is
@@ -1179,8 +1192,10 @@ function resolveStateClaim(claim: Claim, payload: Record<string, unknown>): Clai
       // during round 9's own test matrix before being reported.
       const caveat =
         unknownCount > 0
-          ? ` (this doesn't account for ${unknownCount === 1 ? "a debt minimum" : "some debt minimums"} with no known due date, which BudgetChek can't place in this window without guessing)`
-          : "";
+          ? ` (this doesn't account for ${unknownCount === 1 && unknownMinimumCount === 0 ? "a debt minimum" : "some debt minimums"} with no known due date${unknownMinimumCount > 0 ? " or with no known minimum payment" : ""}, which BudgetChek can't place in this window without guessing)`
+          : unknownMinimumCount > 0
+            ? ` (this doesn't account for ${unknownMinimumCount === 1 ? "a debt" : "some debts"} with no known minimum payment, which BudgetChek can't place in this window without guessing)`
+            : "";
       if (code === "has_shortfall") {
         if (!(shortfall > 0))
           return { ok: false, reason: "claimed a shortfall exists, but there isn't one" };
@@ -1823,6 +1838,54 @@ function debtsWithUnknownTimingCount(payload: Record<string, unknown>): number {
   return Array.isArray(list) ? list.length : 0;
 }
 
+/** The RAW count of funding.debtsWithUnknownMinimum -- same reasoning as
+ *  debtsWithUnknownTimingCount: a malformed entry must still count, so it
+ *  can never suppress the completeness caveat or the plan_complete gate. */
+function debtsWithUnknownMinimumCount(payload: Record<string, unknown>): number {
+  const snap = (payload.snapshot ?? {}) as Record<string, unknown>;
+  const funding = snap.funding as { debtsWithUnknownMinimum?: unknown } | undefined;
+  const list = funding?.debtsWithUnknownMinimum;
+  return Array.isArray(list) ? list.length : 0;
+}
+
+/** Active debts whose minimum payment is unknown, typed and filtered --
+ *  read straight off the engine's FundingPlan. Malformed entries are
+ *  dropped here (use the raw count above to detect their presence). */
+function debtsWithUnknownMinimum(
+  payload: Record<string, unknown>,
+): { id: string; creditor: string; balance: number }[] {
+  const snap = (payload.snapshot ?? {}) as Record<string, unknown>;
+  const funding = snap.funding as { debtsWithUnknownMinimum?: unknown } | undefined;
+  const list = funding?.debtsWithUnknownMinimum;
+  if (!Array.isArray(list)) return [];
+  return list.filter(
+    (d): d is { id: string; creditor: string; balance: number } =>
+      !!d && typeof d === "object" && typeof (d as Record<string, unknown>).creditor === "string",
+  );
+}
+
+/** The ONE plan-complete truth the assistant may claim. Strict and
+ *  fail-closed: true only when the setup flag AND the engine's own
+ *  planComplete are both literally true, a funding plan is present, and
+ *  the RAW unknown-timing and unknown-minimum lists are both genuine,
+ *  empty arrays. An absent flag, an absent list, or a list that is
+ *  non-empty (even with malformed entries) all read as NOT complete --
+ *  never default a missing field to "complete". */
+function planIsComplete(payload: Record<string, unknown>): boolean {
+  const snap = (payload.snapshot ?? {}) as Record<string, unknown>;
+  const funding = snap.funding as
+    { debtsWithUnknownTiming?: unknown; debtsWithUnknownMinimum?: unknown } | null | undefined;
+  if (!funding || typeof funding !== "object") return false;
+  return (
+    snap.complete === true &&
+    snap.planComplete === true &&
+    Array.isArray(funding.debtsWithUnknownTiming) &&
+    funding.debtsWithUnknownTiming.length === 0 &&
+    Array.isArray(funding.debtsWithUnknownMinimum) &&
+    funding.debtsWithUnknownMinimum.length === 0
+  );
+}
+
 function validateAction(action: StructuredAction, payload: Record<string, unknown>): ActionVerdict {
   const snap = (payload.snapshot ?? {}) as Record<string, unknown>;
   const funding = (snap.funding ?? null) as { shortfall?: number } | null;
@@ -1923,10 +1986,9 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
 
     case "add_missing_due_date": {
       if (!action.targetFieldPath) return fail("add_missing_due_date requires a targetFieldPath");
-      // Bills only -- a debt has no due-date field in the product at
-      // all today (no persistent column, no UI field), so recommending
-      // "add" one for a debt would itself be dishonest. See
-      // debt_timing_unavailable for the debt equivalent.
+      // Bills only. (A debt now has a monthly due day on the Debt page, so
+      // this gate is stale in spirit -- left unchanged pending its own
+      // ruling.) See debt_timing_unavailable for the debt equivalent.
       if (!/^bill:(.+)\.due$/.test(action.targetFieldPath)) {
         return fail(
           "add_missing_due_date target must be a bill's due field -- a debt has no due-date field to add at all; use debt_timing_unavailable instead",
@@ -1962,6 +2024,14 @@ function validateAction(action: StructuredAction, payload: Record<string, unknow
       if (!(min.value > 0)) {
         return fail(
           "debt_timing_unavailable target does not have a real, positive minimum payment obligation to report a timing problem for",
+        );
+      }
+      // A paid-off debt (balance <= 0) is not a required current payment
+      // (SME/CEO return), so there is no timing problem to report for it.
+      const bal = resolveFieldPath(`debt:${m[1]}.balance`, payload);
+      if (bal && typeof bal.value === "number" && bal.value <= 0) {
+        return fail(
+          "debt_timing_unavailable target has no balance left (paid off), so there is no required payment to report a timing problem for",
         );
       }
       const due = resolveFieldPath(`debt:${m[1]}.due`, payload);
@@ -2176,7 +2246,7 @@ function renderActionSentence(action: StructuredAction, payload: Record<string, 
     case "debt_timing_unavailable": {
       const m = action.targetFieldPath?.match(/^debt:(.+)\.minimum$/);
       const name = m?.[1] ?? "this debt";
-      return `BudgetChek doesn't have ${name}'s due date yet, so its minimum payment can't be placed in this paycheck window without guessing.`;
+      return `BudgetChek doesn't have ${name}'s due date yet, so its minimum payment can't be placed in this paycheck window without guessing. Add its due day on the Debt page.`;
     }
     case "pay_required_minimum": {
       const m = action.targetFieldPath?.match(/^debt:(.+)\.minimum$/);
@@ -2213,10 +2283,13 @@ function renderActionSentence(action: StructuredAction, payload: Record<string, 
       // separate trailing sentence after an unqualified "No plan change
       // is needed right now" read as tonally self-contradictory.
       const unknownCount = debtsWithUnknownTimingCount(payload);
+      const unknownMinimumCount = debtsWithUnknownMinimumCount(payload);
       const caveat =
         unknownCount > 0
-          ? ` for what BudgetChek can verify, though this doesn't cover ${unknownCount === 1 ? "a debt minimum" : "some debt minimums"} with no known due date, which BudgetChek can't place in this window`
-          : "";
+          ? ` for what BudgetChek can verify, though this doesn't cover ${unknownCount === 1 && unknownMinimumCount === 0 ? "a debt minimum" : "some debt minimums"} with no known due date${unknownMinimumCount > 0 ? " or with no known minimum payment" : ""}, which BudgetChek can't place in this window`
+          : unknownMinimumCount > 0
+            ? ` for what BudgetChek can verify, though this doesn't cover ${unknownMinimumCount === 1 ? "a debt" : "some debts"} with no known minimum payment, which BudgetChek can't place in this window`
+            : "";
       // Also: the second sentence used to always presuppose scheduled
       // items exist, even when funding.items is genuinely empty.
       const noActionSnap = (payload.snapshot ?? {}) as Record<string, unknown>;
@@ -2283,6 +2356,13 @@ function validateDecisionOption(
       if (debtsWithUnknownTiming(payload).some((d) => d.creditor === debtName)) {
         return fail(
           "prioritize_extra_debt_payment target's own required minimum has unknown timing this cycle -- BudgetChek cannot confirm it's accounted for before offering extra principal on top of it",
+        );
+      }
+      // SME/CEO return: an ACTIVE debt whose minimum isn't on file has an
+      // unverified required payment of unknown size -- same gap, same guard.
+      if (debtsWithUnknownMinimum(payload).some((d) => d.creditor === debtName)) {
+        return fail(
+          "prioritize_extra_debt_payment target's own required minimum is unknown -- BudgetChek cannot confirm it's accounted for before offering extra principal on top of it",
         );
       }
       const optSnap = (payload.snapshot ?? {}) as Record<string, unknown>;
