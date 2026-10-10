@@ -94,6 +94,7 @@ export type Database = {
           archived: boolean
           balance: number
           created_at: string
+          due_day: number | null
           id: string
           minimum_payment: number | null
           name: string
@@ -104,6 +105,7 @@ export type Database = {
           archived?: boolean
           balance: number
           created_at?: string
+          due_day?: number | null
           id?: string
           minimum_payment?: number | null
           name: string
@@ -114,6 +116,7 @@ export type Database = {
           archived?: boolean
           balance?: number
           created_at?: string
+          due_day?: number | null
           id?: string
           minimum_payment?: number | null
           name?: string

@@ -53,6 +53,9 @@ export interface Debt {
   balance: number;
   apr: number | null;
   minimum_payment: number | null;
+  // Monthly day-of-month (1-31); null = unknown. Resolved to a real date at
+  // runtime by src/lib/due-day.ts -- never stored as a one-off date.
+  due_day: number | null;
   archived: boolean;
   created_at: string;
 }

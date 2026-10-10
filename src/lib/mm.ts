@@ -11,6 +11,7 @@ import type {
 import type { Debt, PlannedExpense, Profile, SavingsGoal } from "./money";
 import type { PatternClass, PatternRule } from "./pattern-rules";
 import type { IngestTxn } from "./ingest";
+import { resolveDebtDueDate } from "./due-day";
 
 export interface MmAccount {
   id: string;
@@ -239,7 +240,7 @@ export function buildEngineInput(args: {
           balance: Number(d.balance),
           apr: d.apr == null ? null : Number(d.apr),
           minPayment: d.minimum_payment == null ? null : Number(d.minimum_payment),
-          dueDate: null,
+          dueDate: resolveDebtDueDate(d, todayIso),
         })),
       savingsGoals: goals
         .filter((g) => !g.archived)

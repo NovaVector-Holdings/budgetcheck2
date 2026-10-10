@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { fmt } from "@/lib/money";
+import { assistantDebtContext } from "@/lib/due-day";
 import { formatDay } from "@/lib/decision-engine";
 import { useMoneyState } from "@/hooks/use-money-state";
 import { Assistant } from "@/components/mm/assistant";
@@ -206,18 +207,10 @@ function MoneyMeetingPage() {
               due: e.due_date,
               paid: e.paid,
             })),
-            debts: state.debts.map((d) => ({
-              name: d.name,
-              balance: Number(d.balance),
-              apr: d.apr,
-              minimum: d.minimum_payment,
-              // Debts have no due-date column at all today -- always
-              // null, honestly reflecting a permanently-missing field
-              // (not "not yet loaded"). This is what makes the
-              // assistant's "add_missing_due_date" action meaningfully
-              // real for a debt: the due date genuinely isn't on file.
-              due: null,
-            })),
+            // Same resolver and the SAME todayIso the engine input was built with
+            // (Option C): a due day the engine placed is the due date the assistant
+            // states, and a debt with no usable due day stays null (unknown).
+            debts: assistantDebtContext(state.debts, state.engineInput.todayIso),
             goals: state.goals.map((g) => ({
               name: g.name,
               target: Number(g.target_amount),
