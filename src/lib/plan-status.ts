@@ -234,7 +234,7 @@ export function derivePlanStatus(
         ? {
             headline: "Debt-payment timing is incomplete, so this paycheck plan is not final.",
             lead: `BudgetChek doesn't know when ${one ? "this required payment is" : "these required payments are"} due, so it can't tell whether ${one ? "it belongs" : "they belong"} before ${end}:`,
-            ctaLabel: "Add due dates →",
+            ctaLabel: one ? "Add the due date →" : "Add due dates →",
             nextFocus: one
               ? `Add the due date for ${unplaced[0].name}.`
               : "Add the due date for each payment listed above.",

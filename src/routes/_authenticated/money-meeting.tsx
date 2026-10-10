@@ -102,6 +102,11 @@ function MoneyMeetingPage() {
   const state = useMoneyState(user.id);
   const meta = TABS.find((t) => t.key === tab)!;
   const snap = state.snapshot;
+  // The lowest-point projection runs over planned bills and income only; a debt minimum is never
+  // in it, so say so whenever there is an active debt (balance > 0) rather than imply it is.
+  const hasActiveDebt = state.engineInput.obligations.debts.some(
+    (d) => Number.isFinite(d.balance) && d.balance > 0,
+  );
   // Plans and Statements SAVE from rules / imports / artifacts, and the repair panel edits
   // them, so those surfaces also wait on the extras. Everything else needs only the nine
   // engine sources. The "data" tab is the repair surface: always reachable, with a notice.
@@ -109,6 +114,10 @@ function MoneyMeetingPage() {
   const ready =
     tab === "data" ||
     resolveGateView(state, extrasNeeded ? state.extras : undefined).kind === "ready";
+  // The at-a-glance card PRINTS a headline and a projected balance, so it needs the engine
+  // sources resolved on EVERY tab -- including the repair tab, whose panel stays reachable
+  // while loading or failed but must never sit under a figure built from empty defaults.
+  const figuresReady = resolveGateView(state).kind === "ready";
 
   return (
     <div>
@@ -143,7 +152,7 @@ function MoneyMeetingPage() {
 
       {/* Weekly and monthly are now full guided reviews with their own framing;
           the other tabs still share this one at-a-glance figure. */}
-      {ready && tab !== "weekly" && tab !== "monthly" && (
+      {figuresReady && ready && tab !== "weekly" && tab !== "monthly" && (
         <div className="paper-card mt-5 p-5">
           <p className="text-sm text-ink">{snap.headline}</p>
           {snap.projection && snap.window && (
@@ -156,6 +165,7 @@ function MoneyMeetingPage() {
               {snap.reservedTotal > 0
                 ? `, with ${fmt(snap.reservedTotal)} held back and not counted`
                 : ""}
+              {hasActiveDebt ? ", before any debt minimums" : ""}
               .
             </p>
           )}

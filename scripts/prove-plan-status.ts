@@ -276,7 +276,8 @@ function footsToEngine(f: Fixture): boolean {
     "COPY 1: timing-only keeps the APPROVED headline and 'Add due dates' wording exactly",
     pick(timingOne)?.headline ===
       "Debt-payment timing is incomplete, so this paycheck plan is not final." &&
-      pick(timingOne)?.ctaLabel === "Add due dates →" &&
+      pick(timingOne)?.ctaLabel === "Add the due date →" &&
+      pick(timingMany)?.ctaLabel === "Add due dates →" &&
       pick(timingMany)?.headline === pick(timingOne)?.headline &&
       pick(timingMany)?.nextFocus === "Add the due date for each payment listed above." &&
       pick(timingMany)?.totalLabel === "Not yet placed in this paycheck" &&
@@ -448,6 +449,39 @@ record(
       !/set aside/i.test(floorLabel(overdrawn)) &&
       /set aside/i.test(floorLabel(belowBuffer)),
     `${floorLabel(overdrawn)} | ${floorLabel(belowBuffer)}`,
+  );
+}
+{
+  // SME return, defect D: "OVERDRAWN BALANCE + NO BUFFER / NOTHING SET ASIDE" --
+  // the displayed row LABEL must stay semantically correct, not only the math.
+  const empty = status({ balance: -30, buffer: 0, bills: [] }).ps;
+  const owed = status({ balance: -30, buffer: 0, bills: [bill()] }).ps;
+  const keys = (ps: PlanStatus) =>
+    ps.kind === "setup" ? "" : ps.footing.map((r) => r.key).join(",");
+  const row = (ps: PlanStatus, k: string) =>
+    ps.kind === "setup" ? undefined : ps.footing.find((r) => r.key === k);
+  const EXACT = "Balance is overdrawn, so available money is counted as $0";
+  record(
+    "OVERDRAWN 1: balance -$30, NO buffer, nothing set aside, nothing due -> rows are exactly Balance + the overdrawn row, the label says 'overdrawn' (never 'set aside'), it adds back exactly $30, and the remainder is $0",
+    empty.kind === "empty" &&
+      keys(empty) === "balance,floor" &&
+      row(empty, "floor")?.label === EXACT &&
+      row(empty, "floor")?.amount === 30 &&
+      !/set aside|buffer|reserved/i.test(row(empty, "floor")?.label ?? "") &&
+      empty.remainder === 0 &&
+      sum(empty) === 0,
+    JSON.stringify(empty),
+  );
+  record(
+    "OVERDRAWN 2: the same overdrawn, no-buffer person WITH a bill due -> shortfall, rows Balance + Keep available + the SAME overdrawn row (+$30), short by exactly the bill ($85); no row or label mentions a buffer or reserved funds",
+    owed.kind === "shortfall" &&
+      keys(owed) === "balance,keep,floor" &&
+      row(owed, "floor")?.label === EXACT &&
+      row(owed, "floor")?.amount === 30 &&
+      owed.remainder === -85 &&
+      sum(owed) === -85 &&
+      !owed.footing.some((r) => /set aside|buffer|reserved/i.test(r.label)),
+    JSON.stringify(owed),
   );
 }
 record(

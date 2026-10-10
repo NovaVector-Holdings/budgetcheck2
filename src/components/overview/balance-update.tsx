@@ -222,7 +222,7 @@ export function BalanceLine({
     <div className="border-b border-border/70 py-2.5">
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-sm text-muted-foreground">Balance</span>
-        <span className="text-sm text-ink">{fmt(balance)}</span>
+        <span className="text-sm text-ink">{fmt(balance).replace("-", "−")}</span>
       </div>
       <div className="mt-1 flex items-center justify-between gap-3">
         <span className="text-xs text-muted-foreground">

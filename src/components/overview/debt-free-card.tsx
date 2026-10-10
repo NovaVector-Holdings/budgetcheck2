@@ -86,7 +86,7 @@ export function DebtFreeCard({ card }: { card: DebtFreeCardState }) {
                 This paycheck's debt timing is still incomplete.
               </p>
               <p className="mt-2 text-sm font-medium text-primary group-hover:underline">
-                Add due dates →
+                {card.timingCount === 1 ? "Add the due date →" : "Add due dates →"}
               </p>
             </div>
           </Link>

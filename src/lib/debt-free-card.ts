@@ -39,6 +39,8 @@ export type DebtFreeCardState =
       plan: PayoffPlan;
       dueDatesIncomplete: boolean;
       firstTimingId: string | null;
+      /** How many debts are missing a due day (singular vs plural wording). */
+      timingCount: number;
     };
 
 /** "Visa card" / "Visa card and Store card" / "Visa card and 2 other debts". */
@@ -90,5 +92,6 @@ export function debtFreeCardState(args: {
     plan,
     dueDatesIncomplete: timing.length > 0,
     firstTimingId: timing[0]?.id ?? null,
+    timingCount: timing.length,
   };
 }

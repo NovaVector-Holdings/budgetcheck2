@@ -159,12 +159,22 @@ export function CoachSession({
   // Debt — payoff-direction note for the highest-APR debt, using the same
   // deterministic evaluator the assistant and weekly check-in read from.
   // Never a projection beyond what evaluateDebt itself already states.
+  // Only ACTIVE debts (balance > 0) are candidates -- a paid-off row is not a required payment
+  // (SME/CEO return) -- and no direction is offered while the plan is incomplete: evaluateDebt's
+  // free-money figure leaves out the minimums BudgetChek couldn't place, so it would overstate
+  // what is free to put toward a debt.
   const debtDirection = useMemo(() => {
-    if (!debts.length) return null;
-    const highest = [...debts].sort((a, b) => Number(b.apr ?? 0) - Number(a.apr ?? 0))[0];
+    const active = debts.filter((d) => Number(d.balance) > 0);
+    if (!active.length || !snapshot.planComplete) return null;
+    const highest = [...active].sort((a, b) => Number(b.apr ?? 0) - Number(a.apr ?? 0))[0];
     if (!snapshot.window) return null;
     return evaluateDebt(engineInput, highest.id, snapshot.window);
-  }, [debts, engineInput, snapshot.window]);
+  }, [debts, engineInput, snapshot.window, snapshot.planComplete]);
+  const debtDirectionHeld =
+    !debtDirection &&
+    snapshot.complete &&
+    !snapshot.planComplete &&
+    debts.some((d) => Number(d.balance) > 0);
 
   // Spending / patterns — only real, already-configured caps and rules.
   const capsWithGaps = useMemo(() => caps.filter((c) => c.instrument_limit != null && Number(c.instrument_limit) > Number(c.cap_amount)), [caps]);
@@ -447,6 +457,16 @@ export function CoachSession({
           <p className="mt-2 text-sm text-ink">{debtDirection.reason}</p>
           <p className="mt-2 text-xs text-muted-foreground">
             For {debtDirection.creditor}. This reads the same funding math the weekly check-in and the assistant use — it isn't a separate projection.
+          </p>
+        </div>
+      )}
+
+      {debtDirectionHeld && (
+        <div className="paper-card p-6">
+          <h3 className="font-serif text-lg text-ink">Debt — payoff direction</h3>
+          <p className="mt-2 text-sm text-ink">
+            Not available yet. Debt payments aren't fully placed in this paycheck, so BudgetChek
+            can't say how much is free to put toward a debt. Add the missing debt details first.
           </p>
         </div>
       )}

@@ -1,10 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { fmt, today, type Debt } from "@/lib/money";
 import { ordinalDay, parseDueDayInput, resolveDebtDueDate } from "@/lib/due-day";
-import { classifyDebt } from "@/lib/decision-engine";
+import { classifyDebt, debtsMissingMinimum } from "@/lib/decision-engine";
+import { joinDebtNames } from "@/lib/debt-free-card";
+import { GATE_COPY } from "@/lib/data-status";
 import { DebtFreeDate } from "@/components/debt-free-date";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +42,7 @@ function DebtNeedsInput({ d, onFix }: { d: Debt; onFix: () => void }) {
       <button
         type="button"
         onClick={onFix}
+        aria-label={`${minimum ? "Add minimum payment" : "Add due day"} for ${d.name}`}
         className="font-medium text-ink underline underline-offset-2"
       >
         {minimum ? "Add minimum payment" : "Add due day"}
@@ -100,7 +103,12 @@ function DebtPage() {
   const editBtns = useRef(new Map<string, HTMLButtonElement>());
   const openedFor = useRef<string | null>(null);
 
-  const { data: debts = [] } = useQuery({
+  const {
+    data: debtsData,
+    isPending: debtsPending,
+    isError: debtsError,
+    refetch: refetchDebts,
+  } = useQuery({
     queryKey: ["debts", user.id],
     queryFn: async () => {
       // Shares ["debts", id] with useMoneyState: same ordering, and it must THROW on error --
@@ -114,6 +122,9 @@ function DebtPage() {
       return (data ?? []) as Debt[];
     },
   });
+  // An empty list is only an EMPTY list once the read has actually succeeded: a pending or failed
+  // read must never render "No debts listed -- worth celebrating" or a total of $0.
+  const debts = useMemo(() => debtsData ?? [], [debtsData]);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["debts", user.id] });
 
@@ -169,7 +180,9 @@ function DebtPage() {
         balance: Number(balance),
         apr: apr ? Number(apr) : null,
         minimum_payment: minPay ? Number(minPay) : null,
-        due_day: due,
+        // Sent only when a due day was entered, so adding a debt still works against a database
+        // that has not had the due_day migration applied yet.
+        ...(due != null ? { due_day: due } : {}),
       });
       if (error) throw error;
     },
@@ -217,10 +230,17 @@ function DebtPage() {
       id: string;
       minimum_payment: number | null;
       due_day: number | null;
+      /** The due day on file before this edit; lets a CLEAR (null) still be written. */
+      hadDueDay: boolean;
     }) => {
       const { error } = await supabase
         .from("debts")
-        .update({ minimum_payment: v.minimum_payment, due_day: v.due_day })
+        // due_day is written only when it carries information (a value, or clearing one that
+        // existed), so a minimum-only edit works before the migration is applied.
+        .update({
+          minimum_payment: v.minimum_payment,
+          ...(v.due_day != null || v.hadDueDay ? { due_day: v.due_day } : {}),
+        })
         .eq("id", v.id);
       if (error) throw error;
     },
@@ -238,17 +258,28 @@ function DebtPage() {
     // Blank = unknown (saved as null). A typed 0 is allowed: it means no payment
     // is required right now, which is different from not knowing.
     const min = editMin.trim() === "" ? null : Number(editMin);
-    if (min != null && (!Number.isFinite(min) || min < 0))
+    // type=number reports unparsable text ("1e", "3.5.5") as an EMPTY value; without this check
+    // that would read as "blank" and silently erase the minimum / due day already on file.
+    if (minRef.current?.validity.badInput)
+      err.min = "Enter an amount of 0 or more, or leave it blank.";
+    else if (min != null && (!Number.isFinite(min) || min < 0))
       err.min = "Enter an amount of 0 or more, or leave it blank.";
     const due = parseDueDayInput(editDue);
-    if (!due.ok) err.due = due.error;
+    if (dueRef.current?.validity.badInput)
+      err.due = "Enter a whole number from 1 to 31, or leave it blank.";
+    else if (!due.ok) err.due = due.error;
     if (err.min || err.due || !due.ok) {
       setEditErr(err);
       (err.min ? minRef : dueRef).current?.focus();
       return;
     }
     setEditErr({});
-    updateDebt.mutate({ id: d.id, minimum_payment: min, due_day: due.value });
+    updateDebt.mutate({
+      id: d.id,
+      minimum_payment: min,
+      due_day: due.value,
+      hadDueDay: d.due_day != null,
+    });
   };
 
   const archiveDebt = useMutation({
@@ -268,6 +299,46 @@ function DebtPage() {
       : Number(b.apr ?? 0) - Number(a.apr ?? 0),
   );
   const total = debts.reduce((s, d) => s + Number(d.balance), 0);
+  // The ENGINE's own classifier names the active debts with no minimum on file (never re-derived
+  // here): the payoff simulation counts a missing minimum as $0, so any date it prints would be
+  // a guess, and SME item 9 forbids a confident date next to an incomplete plan.
+  const unknownMinimum = debtsMissingMinimum(
+    debts.map((d) => ({
+      id: d.id,
+      creditor: d.name,
+      balance: Number(d.balance),
+      apr: d.apr,
+      minPayment: d.minimum_payment,
+      dueDate: null,
+    })),
+  );
+
+  if (debtsPending || debtsError) {
+    return (
+      <div>
+        <p className="eyebrow">Debt</p>
+        <h1 className="mt-2 font-serif text-3xl text-ink">Your debt payoff plan</h1>
+        {debtsPending ? (
+          <section className="paper-card mt-6 p-6" aria-busy="true">
+            <p className="text-sm text-muted-foreground" role="status">
+              {GATE_COPY.loadingLine}
+            </p>
+          </section>
+        ) : (
+          <section className="paper-card mt-6 p-6" role="alert">
+            <p className="eyebrow">{GATE_COPY.eyebrow}</p>
+            <h2 className="mt-2 font-serif text-xl text-ink">
+              BudgetChek couldn't load your debts, so it won't show a total or a payoff date.
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{GATE_COPY.body}</p>
+            <Button type="button" className="mt-4" onClick={() => void refetchDebts()}>
+              {GATE_COPY.retry}
+            </Button>
+          </section>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -344,7 +415,11 @@ function DebtPage() {
               value={minPay}
               onChange={(e) => setMinPay(e.target.value)}
               placeholder="35"
+              aria-describedby="db-min-hint"
             />
+            <p id="db-min-hint" className="text-xs text-muted-foreground">
+              Leave blank if you don't know it yet. Enter 0 if no payment is required right now.
+            </p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="db-due">Due day of month (optional)</Label>
@@ -407,7 +482,22 @@ function DebtPage() {
 
       {debts.length > 0 && (
         <div className="mt-6">
-          <DebtFreeDate debts={debts} method={method} />
+          {unknownMinimum.length > 0 ? (
+            <section className="paper-card p-6">
+              <p className="eyebrow">Your debt-free date</p>
+              <p className="mt-2 text-sm font-medium leading-relaxed text-ink">
+                No payoff date yet — {joinDebtNames(unknownMinimum.map((d) => d.creditor))}{" "}
+                {unknownMinimum.length === 1 ? "has" : "have"} no minimum payment on file.
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                Without {unknownMinimum.length === 1 ? "it" : "them"}, any date would be a guess.
+                Add {unknownMinimum.length === 1 ? "the minimum payment" : "the minimum payments"}{" "}
+                below and your date appears.
+              </p>
+            </section>
+          ) : (
+            <DebtFreeDate debts={debts} method={method} />
+          )}
         </div>
       )}
 

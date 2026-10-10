@@ -1192,7 +1192,7 @@ function resolveStateClaim(claim: Claim, payload: Record<string, unknown>): Clai
       // during round 9's own test matrix before being reported.
       const caveat =
         unknownCount > 0
-          ? ` (this doesn't account for ${unknownCount === 1 ? "a debt minimum" : "some debt minimums"} with no known due date${unknownMinimumCount > 0 ? " or with no known minimum payment" : ""}, which BudgetChek can't place in this window without guessing)`
+          ? ` (this doesn't account for ${unknownCount === 1 && unknownMinimumCount === 0 ? "a debt minimum" : "some debt minimums"} with no known due date${unknownMinimumCount > 0 ? " or with no known minimum payment" : ""}, which BudgetChek can't place in this window without guessing)`
           : unknownMinimumCount > 0
             ? ` (this doesn't account for ${unknownMinimumCount === 1 ? "a debt" : "some debts"} with no known minimum payment, which BudgetChek can't place in this window without guessing)`
             : "";
@@ -2286,7 +2286,7 @@ function renderActionSentence(action: StructuredAction, payload: Record<string, 
       const unknownMinimumCount = debtsWithUnknownMinimumCount(payload);
       const caveat =
         unknownCount > 0
-          ? ` for what BudgetChek can verify, though this doesn't cover ${unknownCount === 1 ? "a debt minimum" : "some debt minimums"} with no known due date${unknownMinimumCount > 0 ? " or with no known minimum payment" : ""}, which BudgetChek can't place in this window`
+          ? ` for what BudgetChek can verify, though this doesn't cover ${unknownCount === 1 && unknownMinimumCount === 0 ? "a debt minimum" : "some debt minimums"} with no known due date${unknownMinimumCount > 0 ? " or with no known minimum payment" : ""}, which BudgetChek can't place in this window`
           : unknownMinimumCount > 0
             ? ` for what BudgetChek can verify, though this doesn't cover ${unknownMinimumCount === 1 ? "a debt" : "some debts"} with no known minimum payment, which BudgetChek can't place in this window`
             : "";

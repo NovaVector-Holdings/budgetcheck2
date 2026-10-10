@@ -49,7 +49,14 @@ export function useMoneyState(
 ) {
   // Engine queries retry twice (~3s) so "unavailable" surfaces quickly; the extras keep the default.
   const useSource = <T>(key: string, fn: () => Promise<T>, engine = true) =>
-    useQuery({ queryKey: [key, userId], queryFn: fn, ...(engine ? { retry: 2 } : {}) });
+    useQuery({
+      queryKey: [key, userId],
+      queryFn: fn,
+      // No refetch on tab focus for the engine's sources: an errored refetch with retained data
+      // counts as UNAVAILABLE (a stale figure must never pass as current), so a transient blip on
+      // focus would otherwise unmount the whole page and discard anything half-typed.
+      ...(engine ? { retry: 2, refetchOnWindowFocus: false } : {}),
+    });
 
   const profile = useSource<Profile>("profile", async () => {
     const { data, error } = await supabase

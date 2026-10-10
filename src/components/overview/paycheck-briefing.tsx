@@ -272,6 +272,7 @@ function IncompleteBriefing({
                 <Link
                   to="/debt"
                   search={{ edit: d.id }}
+                  aria-label={`${d.reason === "timing" ? "Add due date" : "Add minimum payment"} for ${d.name}`}
                   className="ml-2 text-xs font-medium text-ink underline underline-offset-2"
                 >
                   {d.reason === "timing" ? "Add due date" : "Add minimum payment"}

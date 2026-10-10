@@ -1,12 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { EXPENSE_CATEGORIES, fmt, today, type PlannedExpense } from "@/lib/money";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { GATE_COPY } from "@/lib/data-status";
 
 export const Route = createFileRoute("/_authenticated/future-expenses")({
   head: () => ({
@@ -32,7 +33,12 @@ function FutureExpensesPage() {
   const [category, setCategory] = useState<string>("other");
   const [recurring, setRecurring] = useState<string>("none");
 
-  const { data: expenses = [] } = useQuery({
+  const {
+    data: expensesData,
+    isPending: expensesPending,
+    isError: expensesError,
+    refetch: refetchExpenses,
+  } = useQuery({
     queryKey: ["expenses", user.id],
     queryFn: async () => {
       // Shares ["expenses", id] with useMoneyState, so it must THROW on error: a swallowed []
@@ -46,6 +52,9 @@ function FutureExpensesPage() {
       return (data ?? []) as PlannedExpense[];
     },
   });
+  // "Nothing planned" is only true once the read has SUCCEEDED; a pending or failed read must not
+  // be shown as an empty list of bills.
+  const expenses = useMemo(() => expensesData ?? [], [expensesData]);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["expenses", user.id] });
 
@@ -167,7 +176,20 @@ function FutureExpensesPage() {
         )}
         <section className="paper-card p-6">
           <h2 className="font-serif text-lg text-ink">Upcoming</h2>
-          {upcoming.length === 0 ? (
+          {expensesPending ? (
+            <p className="mt-3 text-sm text-muted-foreground" role="status">
+              {GATE_COPY.loadingLine}
+            </p>
+          ) : expensesError ? (
+            <div className="mt-3" role="alert">
+              <p className="text-sm text-ink">
+                BudgetChek couldn't load your bills, so it won't say nothing is planned.
+              </p>
+              <Button type="button" className="mt-3" onClick={() => void refetchExpenses()}>
+                {GATE_COPY.retry}
+              </Button>
+            </div>
+          ) : upcoming.length === 0 ? (
             <p className="mt-3 text-sm text-muted-foreground">Nothing planned. Add your next known bill above.</p>
           ) : (
             <ul className="divide-y divide-border">{upcoming.map((e) => <Row key={e.id} e={e} />)}</ul>
