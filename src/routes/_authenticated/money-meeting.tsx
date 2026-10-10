@@ -165,8 +165,7 @@ function MoneyMeetingPage() {
               {snap.reservedTotal > 0
                 ? `, with ${fmt(snap.reservedTotal)} held back and not counted`
                 : ""}
-              {hasActiveDebt ? ", before any debt minimums" : ""}
-              .
+              {hasActiveDebt ? ", before any debt minimums" : ""}.
             </p>
           )}
           {snap.missing.length > 0 && (
