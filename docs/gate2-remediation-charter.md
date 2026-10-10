@@ -1,270 +1,201 @@
-# Gate 2 Remediation: Charter, Implementation Record, and Debt-Timing Impact
+# Gate 2 Remediation: Charter, Implementation Record, Debt Timing and Completeness
 
-CEO / PRODUCT RULING "GATE 2 RESULT + FINAL REMEDIATION PATH" (2026-10-09). Gate 2 current round:
-HOLD. The d5ad524f / 83e294b2 stimulus is RETIRED (kept in `docs/gate2-stimulus/` as historical
-evidence only; never reused). PR #12 stays OPEN / UNMERGED. Gate 3 production port: NOT authorized.
+Status: PR #12 OPEN / UNMERGED. Participant study HOLD. Gate 3 / production port HOLD. The
+d5ad524f / 83e294b2 stimulus is RETIRED (kept in `docs/gate2-stimulus/` as historical evidence
+only, never reused). This branch is NOT participant-facing or user-facing: the database column
+behind Option C has not been applied (Section 4), and the final proof pair has not been approved.
 
-This document is the standing workstream-closure record: scope, acceptance, proof, exit, deferred
-(Section 1), what was built and proven in this pass (Section 2), and the data-model / UI impact of
-debt timing that the ruling requires BEFORE any migration (Section 3). Section 4 lists the rulings
-this workstream cannot close without.
+Governing rulings, in order: CEO / PRODUCT RULING "GATE 2 RESULT + FINAL REMEDIATION PATH"
+(2026-10-09), then the SME / CEO RETURN of the same day (UI proofs approved with conditions;
+Option C authorized for the prototype; classifier rules, assistant/Overview consistency,
+Debt-free card and data-loading changes required). Sections 1-3 are the standing charter and the
+record of the first pass; Section 5 maps every SME item to what was done; Sections 6-8 hold the
+limits, the open rulings and the evidence index.
 
 ## 1. Charter
 
-**Scope (bounded).** Ruling items 2-5 and the prototype half of 8:
-
-1. A PLAN INCOMPLETE state on the Overview (item 2).
-2. Debt timing resolved for the prototype as a requirement and an implementation plan (item 3).
-3. Balance / remainder hierarchy cleanup: one balance, with its Update control inside the
-   calculation (item 4).
-4. One next focus per state (item 5).
-5. A healthy COMPLETE-plan proof and an incomplete-plan proof for CEO approval (item 8).
-6. The corrected research instrument, frozen only after the proofs are approved (items 6, 7).
+**Scope (bounded).** The PLAN INCOMPLETE state; debt timing resolved for the prototype; one
+balance with its Update inside the calculation; one next focus per state; a healthy
+COMPLETE-plan proof and an incomplete-plan proof for approval; the corrected research
+instrument, frozen only after the proof pair is approved.
 
 **Acceptance.**
 
 - An incomplete plan never shows the normal "Estimated remaining". The incomplete message is the
-  dominant element; any known-item dollar figure is labeled PARTIAL, states that required debt
-  minimums are not included, and is visually subordinate.
+  dominant element; any known-item figure is labeled PARTIAL, says required debt minimums are
+  not included, and is visually subordinate.
 - The visible calculation provably sums to the engine's own remainder in every state.
-- Exactly one next focus is shown in every computed state (incomplete / shortfall / healthy /
-  empty); no free-text "Your focus" line. The setup state is a different thing: it lists what is
-  still missing, by design.
-- One balance figure, with Update inside the calculation; the Update control changes the number the
+- Exactly one next focus in every computed state; no free-text "Your focus" line.
+- One balance figure, with Update inside the calculation, and Update changes the number the
   engine actually uses.
-- 0 axe violations (WCAG 2.0/2.1 A + AA), both themes, desktop and 390px mobile; no horizontal
-  overflow.
-- PR #10 locked surface unchanged: `decision-engine.ts`, `grounding.ts`, `ci.yml` untouched;
-  157/157 grounding and 13/13 decision-engine proofs still pass.
+- "Incomplete" is ONE semantic truth, fixed at the engine: the Overview, the Debt-free card and
+  the assistant's "the plan is complete" claim read the same flag.
+- A failed required query is an explicit UNAVAILABLE state, and no figure renders before every
+  engine source has loaded.
+- 0 axe violations (WCAG 2.0/2.1 A + AA), both themes, desktop and 390px mobile; no overflow.
+- The locked proofs stay green and unedited: `scripts/prove-grounding.ts` 157/157,
+  `scripts/prove-decision-engine.ts` 13/13. `.github/workflows/ci.yml` untouched.
 
-**Proof required.** `scripts/prove-plan-status.ts` (deterministic, network-free, drives the real
-engine); fixture-driven captures of every state in both themes and viewports; interaction flows;
-axe results; build / typecheck / scoped lint.
-
-**Exit condition.** The workstream closes at the ruling's Definition of Done: (1) incomplete-plan
-behavior implemented; (2) debt-timing requirement explicitly resolved for the prototype; (3)
-balance / remainder hierarchy cleaned up; (4) exact healthy and incomplete proofs APPROVED; (5)
-corrected instrument frozen; (6) five clean participants complete the study; (7) one official score
-issued. No additional design round is automatic. If mandatory D fails again, STOP iterating on
+**Exit condition (Definition of Done).** (1) incomplete-plan behavior implemented; (2) debt timing
+resolved for the prototype; (3) balance / remainder hierarchy cleaned up; (4) the exact healthy
+and incomplete proof pair APPROVED; (5) corrected instrument frozen; (6) five clean participants
+complete the study; (7) one official score issued. If mandatory D fails again: STOP iterating on
 microcopy and return for a product-strategy decision.
 
-**Deferred (not in this workstream).** Any production port or merge of the unvalidated Overview;
-any production schema change; weekly / biweekly / semimonthly debt payment cadences; recurring-bill
-roll-forward and overdue-bill handling (Section 3.6); the Weekly Check-in / assistant wording
-(Section 4, ruling 6); repo-wide lint cleanup; Gate 3 readiness docs run as a separate,
-non-production track.
+**Deferred.** Production port or merge; any production schema change; weekly / biweekly /
+semimonthly debt cadences; recurring-bill roll-forward and overdue handling; bank-connectivity
+copy (a separate Financial Data Connectivity workstream, SME item 15); repo-wide lint cleanup;
+Gate 3 readiness (planning only, separate track).
 
-## 2. Implemented in this pass (UI-only; no migration, no engine change)
+## 2. First pass (commit 9af0916, reviewed and approved with conditions)
+
+`derivePlanStatus` over the one governed snapshot; the dominant PLAN INCOMPLETE banner with the
+known-item figure demoted to a dashed, muted "Known-item remainder (partial)"; itemized Keep
+available; reserved funds, the $0 floor and certain inflows as their own rows (a sweep proof
+asserts the rows sum to the engine remainder); the Update control on the Balance line (replacing
+the standalone card and the free-text "Your focus"); the accounts-backed balance link; no balance
+on file is a setup state, not a $0; the shortfall text contrast fix. CI on that exact SHA:
+success (run 38008374973).
+
+## 3. This pass: what changed
 
 | Area | Change |
 |---|---|
-| `src/lib/plan-status.ts` (new) | Pure `derivePlanStatus(snapshot, engineInput, ctx)` -> `setup / incomplete / shortfall / healthy / empty`. "Incomplete" is exactly `funding.debtsWithUnknownTiming.length > 0`, the engine's own list of required minimums it refuses to place without guessing. No new money math. `EngineSnapshot.complete` is deliberately not reused (it means setup-complete). |
-| `src/lib/mm.ts` | `balanceSource()` / `spendableAccounts()`: names where the engine's balance comes from and tells "no balance on file" apart from a real $0 (`buildEngineInput` collapses an absent balance to 0). |
-| `src/components/overview/paycheck-briefing.tsx` | Rewritten around the states. Incomplete: banner "Debt-payment timing is incomplete, so this paycheck plan is not final.", the unplaced minimums listed with their total, one next focus with "Add due dates", and a dashed, muted "Partial calculation · known items only" block ending in "Known-item remainder (partial)" with "Required debt minimums ($X) are not included yet, so this is not the final remainder." Complete: itemized Keep available, reserved funds / inflows / clamp as their own rows, one "Next focus" box. |
-| `src/components/overview/balance-update.tsx` (new) | Update control inside the Balance line (inline form, focus managed, returns focus on close). Replaces the standalone "Current balance" card. |
-| `src/routes/_authenticated/overview.tsx` | Removed the standalone balance card and the free-text "Your focus" line. |
-| `src/components/paycheck-cards.tsx` | Removed the now-orphaned `CashOnHandEditor`. |
-| `scripts/prove-plan-status.ts` + `npm run validate:plan-status` | 30 proof cases (see below). Not wired into CI: `ci.yml` edits take effect immediately and need CEO sign-off. |
+| Engine (locked surface, one isolated commit `0f2429a`) | `classifyDebt` is the ONE place a debt's role is decided: paid-off (balance <= 0) first, then unknown minimum, then explicit $0 minimum, then unknown timing, then in / outside the window. `buildFundingPlan` builds every bucket from it. New `FundingPlan.debtsWithUnknownMinimum`, new `EngineSnapshot.planComplete` (setup on file AND both unknown lists empty), optional `account.balanceKnown`, exported `debtsMissingMinimum`. Every existing string is byte-identical when the new list is empty; new sentence variants only add an honest clause. `EngineSnapshot.complete` keeps its setup-only meaning (two locked proofs pin it). |
+| Grounding + prompt (same commit) | `planIsComplete` (strict, fail-closed: setup flag, engine flag, and both raw lists empty) now backs `plan_complete` / `plan_incomplete`, so the assistant and the Overview cannot disagree. `snapshot.complete` removed from the fact paths. Caveats extended without digits or "N debts" phrasing. Stale "no due-date column" text updated; the reason string the locked proof pins is untouched. |
+| Option C (`6af7145`, `0d0178d`) | Migration `20261009210000_debts_due_day.sql` (additive, idempotent, no default, no backfill); `src/lib/due-day.ts` (pure, UTC, clamps 29-31, 56,606-case property sweep); `mm.ts` and the assistant payload both call the SAME `resolveDebtDueDate` with the engine's own `todayIso`; Debt page: due-day field on add, inline Edit of minimum AND due day for existing debts, "due the 15th" display, `?edit=<id>` deep link. |
+| Data gating (`71fd83b`, `8bebdea`) | Every engine query throws on error; `loading` is `isPending` over ALL nine engine sources; a failed source is UNAVAILABLE even when old data is retained; Money Meeting and the Overview render only inside the gate; the Debt, Bills and repair surfaces never read a pending or failed read as an empty list. |
+| Overview integration (`25b54b7`) | One `PlanStatus` shared by the briefing and the Debt-free card. Three honest incomplete variants (timing only keeps the approved wording; minimum only; both), each debt linking to its own editor. Debt-free card: qualified date when only due days are missing, NO date when any minimum is missing. Always-100% progress bar removed. |
+| Review fixes (`b1751b6`) | See Section 6 (what an independent adversarial review found and what was fixed). |
 
-**Defects in the retired design found and fixed while doing this** (each was visible in the
-retired stimulus or one step behind it):
+## 4. Debt timing: Option C, how it works and how it is applied
 
-- The old editor invalidated query keys the money state does not read, so a saved balance did not
-  refresh the briefing until a reload. Now invalidates `["profile", userId]` plus the Money Meeting
-  keys.
-- With spendable accounts on file the engine ignores `profile.cash_on_hand`, so the old "Update"
-  silently changed nothing. When accounts supply the balance, the control now says so and links to
-  the accounts; only the buffer (which lives on the profile) stays editable there.
-- With no balance on file the engine used $0 and showed a healthy-looking briefing. That is now a
-  setup state with the balance entry inline. (When a balance IS on file but payday or cadence is
-  missing, the Update control stays available there too; the review caught that the first version
-  of this change had dropped it.)
-- When balance < buffer the old rows did not add up to the remainder (the engine floors at $0). The
-  rows now include an explicit "counted as $0" line, and a sweep proof asserts they sum to the
-  engine's remainder in all 450 combinations tried.
-- The retired shortfall box used `text-destructive` on a destructive tint (4.43:1 light, 4.15:1
-  dark; WCAG AA needs 4.5:1). Now ink text on the tint.
+**Data model.** `debts.due_day smallint`, nullable, `CHECK (due_day IS NULL OR due_day BETWEEN 1 AND 31)`.
+NULL means honestly unknown. Never a stored one-off date (it would go stale and silently fall out
+of the window while still looking known).
 
-**Verified.**
+**Resolution.** `nextOccurrenceOnOrAfter(dueDay, todayIso)`: this month's day if it has not
+passed (due day == today counts), else next month's; days 29-31 clamp to the real month length;
+anything invalid resolves to null, which the engine lists as unknown timing (fails closed).
 
-- `npm run validate:plan-status` 30/30; `validate:grounding` 157/157; `validate:decision-engine`
-  13/13 (unchanged). The plan-status proof was mutation-tested: disabling the incomplete trigger,
-  dropping the clamp row, or letting a known shortfall outrank incomplete each fails the proof.
-- `npm run build` passes; `tsc --noEmit` shows only the existing `src/routes/__root.tsx` error that
-  is also present at baseline; scoped ESLint is clean on every file this pass owns.
-- 56 fixture captures (14 states x light/dark x desktop 1440 / mobile 390): 0 axe violations, 0
-  horizontal overflow, 0 page errors, 0 unmocked network requests. 12/12 interaction flows pass
-  (update open / cancel / save and recompute, accounts-backed update, first-time balance entry,
-  and Update staying available in the setup state when only payday is missing).
+**Placement.** Unchanged engine rule: a debt is a plan item only when its resolved date falls in
+`[today, next payday]` (inclusive); a real date outside the window is a known exclusion, not an
+unknown. Worked example (today 2026-10-09, payday 2026-10-16): due the 14th is inside; due the
+24th and due the 5th (which resolves to Nov 5) are outside.
 
-**How the captures were made.** A local dev server (`localhost:8080`) with every Supabase request
-fulfilled from in-memory fixtures and anything unmocked aborted: no credentials, no live database,
-nothing read from or written to the prototype project. "Today" is pinned to 2026-10-09. The fixture
-scenario mirrors the retired stimulus (balance $640, buffer $100, two bills in window, $875 saved,
-$2,790 owed, $115/mo of minimums) with the dates advanced to the current pay cycle.
+**Governance: does pushing the migration apply it? No.** Lovable's own documentation states that
+it "does not run migration files that you add through Git" and "does not deploy a changed Edge
+Function or run a new migration file when your commits sync", and that it syncs ONE branch (by
+default the repository's default branch), so a feature branch does not reach it until merged
+(docs.lovable.dev/integrations/git-sync-overview and /integrations/github, read 2026-10-09). The
+prototype project (`ifmphqppwcaueherhfwm`) is also not in the company's own Supabase
+organization, so it is Lovable-managed and no tool here can write to it. Consequences:
 
-## 3. Debt timing: data-model and UI impact (no migration introduced)
+- Committing and pushing the migration file here applies nothing. Nothing was applied.
+- Applying it is a deliberate CEO action: paste the SQL from the migration file into the Lovable
+  chat ("apply this migration exactly as written") or run it in the SQL editor. The statements are
+  idempotent, so a Lovable-recorded duplicate is harmless. After it exists, Lovable regenerates
+  `src/integrations/supabase/types.ts`; the three hand-matched `due_day` lines should come out
+  identical (diff them).
+- Until then the app degrades safely: add and edit send `due_day` only when it carries
+  information, so adding a debt or editing a minimum still works on the current database; only
+  entering a due day needs the column.
+- This remains a docs-based confirmation, not a live test; it was deliberately not tested by
+  pushing a migration. A production migration is a separate approval.
 
-### 3.1 Where the product stands
+## 5. SME return: item by item
 
-- `debts` has `minimum_payment` (nullable) but NO due date, due day, frequency, or next-payment
-  field. `buildEngineInput` in `src/lib/mm.ts` hard-codes every debt's `dueDate: null`, so every debt with a positive
-  minimum is "unknown timing" today and any account with such a debt is an INCOMPLETE plan.
-- The engine already does the placing: `buildFundingPlan` puts a debt in the plan when its
-  `dueDate` is a real ISO date inside `[today, next_pay_date]` (inclusive at both ends), excludes a
-  real date outside the window without flagging it, and lists a debt with no usable date in
-  `debtsWithUnknownTiming`. Proven in `scripts/prove-decision-engine.ts`. The ONLY blocker is
-  that nothing ever supplies a date.
-- The only debt-writing UI is `src/routes/_authenticated/debt.tsx`: an add form (name, balance,
-  APR, optional minimum) and Log payment / Archive. There is no edit path for an existing debt's
-  minimum, APR or timing.
-- Consequence for this pass: the incomplete state works today, but its next focus ("Add the due
-  date for ...") and its "Add due dates" button go to a page that cannot accept a due date yet.
-  Until the capture below exists that instruction cannot be followed, and any account with a debt
-  minimum can never leave the incomplete state. This branch is therefore NOT a candidate for any
-  participant-facing or user-facing use until Section 3 lands; the proofs show the intended end
-  state.
+| SME item | Status | Evidence |
+|---|---|---|
+| 1 UI accepted | Kept | prior proofs; incomplete state, one next focus, one balance |
+| 2D overdrawn + no buffer label | DONE | `prove-plan-status` OVERDRAWN 1 and 2, FOOTING 3b: exact label "Balance is overdrawn, so available money is counted as $0", rows `balance,floor`, never "set aside"; capture in the return package; mutation-checked |
+| 3 Option C | DONE (code); NOT applied to any database | Section 4 |
+| 4 monthly only, never approximate | DONE | no other cadence anywhere; unsupported timing stays incomplete |
+| 5A paid-off debt not required | DONE | `classifyDebt`; COMPLETE 5; `prove-completeness` |
+| 5B active debt + unknown minimum incomplete | DONE | engine list + `planComplete`; Overview copy variant; Debt-free card suppression; Debt page prompt |
+| 6 incomplete + shortfall | DONE | incomplete outranks; "Known-item shortfall (partial)... could be larger" |
+| 7 partial remainder | DONE | label, exclusion note, de-emphasis; never "Estimated remaining" |
+| 8 assistant / Overview consistency | DONE for the completeness claim; PARTIAL for two gates | Section 7 ruling R1 |
+| 9 Debt-free card | DONE | qualified (timing only) or no date (minimum unknown), also with no payday; Debt page itself also stops printing a date while a minimum is missing |
+| 10A failed query is unavailable | DONE on every surface that prints a figure from the engine; the Debt and Bills pages | Savings and Analytics are outside the engine, see R4 |
+| 10B no figure before all sources load | DONE | `isPending` over nine sources; flow D0 |
+| 11 CTA / edit path | DONE | `/debt?edit=<id>` per debt and from the banner; minimum AND due day editable for existing debts |
+| 12 CI | HELD per the ruling | Section 7 ruling R8; CI for the exact final SHA is in the return package |
+| 13 healthy-with-debts proof | DONE | one debt inside, two outside, rows sum to the engine, one next focus, no warning, correct cards |
+| 14 instrument | NOT frozen | awaiting the pair approval |
+| 15 bank-connectivity copy | NOT touched | backlog |
 
-### 3.2 Minimum prototype implementation (recommended: Option C)
+## 6. Independent adversarial review (5 lenses, 54 findings, each skeptic-verified)
 
-Supports exactly the three things the ruling names: debt minimum, due date / timing, inclusion in
-the correct paycheck window.
+Fixed in `b1751b6`: the repair tab printed a headline and projection from empty or failed
+sources; the Debt and Bills pages read a failed read as "No debts listed - worth celebrating" /
+"Nothing planned"; the Debt page printed a payoff date built on a missing minimum counted as $0;
+unparsable text in a number field silently erased a saved minimum; add and edit would have
+failed against a database without the new column; the Weekly Check-in said "Nothing urgent this
+week" under an incomplete plan and printed a never-entered balance as $0.00 and blamed debts for
+a setup gap; the monthly review recommended paying a paid-off debt and gave a payoff direction
+that ignored unplaced minimums; a transient refetch error unmounted the page and discarded
+input; one grounding caveat read as one debt when two were missing different things; duplicated
+link names; two different minus signs.
 
-| Requirement | What is needed |
-|---|---|
-| Debt minimum | Already stored (`minimum_payment`). Add an edit path (none exists). |
-| Due date / timing | ONE additive nullable column: `ALTER TABLE public.debts ADD COLUMN due_day smallint CHECK (due_day BETWEEN 1 AND 31);` Monthly day-of-month. No default, no backfill, no new table / index / policy / grant (the existing row-level policy and grants cover it), reversible with `DROP COLUMN`. Existing rows stay NULL, so they stay honestly "unknown" until the person enters the day. |
-| Inclusion in the right window | A small pure helper `nextOccurrenceOnOrAfter(dueDay, todayIso)` (UTC arithmetic; day 29-31 clamped to the month length) and that `dueDate: null` line becomes `dueDate = due_day ? nextOccurrenceOnOrAfter(due_day, todayIso) : null`. The engine is unchanged. |
+Refuted by the skeptics and left alone: a claim that the at-a-glance projection was a blocker;
+"due-day resolution can silently produce a complete plan" (documented limit, Section 8);
+"no CI evidence for the exact HEAD" (checked separately); gate copy asserting nothing changed.
 
-**Why `due_day` and not a stored one-off date.** A stored `due_date` goes stale after it passes:
-`hasUsableDueDate` stays true, the date is now outside the window, and the debt falls out of both
-the plan AND the unknown list, leaving a healthy-looking plan with a missing required payment. That
-is the exact failure the ruling targets. A due day resolved to its next occurrence is always on or
-after today, so it cannot go stale, and NULL stays honestly unknown.
+## 7. Open rulings (each with a recommendation; none is a prerequisite for the proof pair)
 
-**Files (Option C).**
+- **R1. Two assistant gates still read the setup-only flag.** `no_action_needed` and a
+  discretionary `user_decision` can still validate while the Overview shows PLAN INCOMPLETE; the
+  rendered sentence carries the unknown-debt caveat and shows no figure. Moving both to
+  `planIsComplete` is a two-line change but flips two pinned locked-proof PASS cases and one
+  pinned reason string, i.e. it requires editing `prove-grounding.ts`. Recommend: do it, with the
+  three locked cases deliberately rewritten and the new expectation proven. Needs your explicit
+  go because it edits the locked proofs.
+- **R2. The engine headline still states "with $X left after your buffer" in the unresolved
+  variants.** It is printed by the Weekly Check-in, the Money Meeting at-a-glance card and the
+  Ask tab, next to the incomplete wording. Recommend dropping the dollar clause from the
+  unresolved variants only (the locked proofs do not assert the amount). Locked wording: needs
+  your go.
+- **R3. An explicit $0 minimum means "no payment required" (known), blank means unknown.** The
+  SME text does not say this; it is the safest reading and is stated in the edit form hint.
+- **R4. Savings and Analytics pages are outside the engine and still read a failed query as
+  empty; Savings and Settings invalidate keys the engine never reads, so the first paint after
+  an edit there can briefly show a pre-save figure.** Recommend a small follow-up.
+- **R5. Engine queries no longer refetch on tab focus** (an errored refetch with retained data
+  counts as unavailable, so a blip would unmount the page and discard half-typed input). Trade-off:
+  edits made on another device appear on next navigation, not on focus.
+- **R6. `add_missing_due_date` is still bill-only, and a paid-off debt is still actionable by the
+  assistant** (`review_due_date`, `missing_minimum`). Recommend a follow-up with its own proofs.
+- **R7. Apply the migration** (Section 4) before any live-data exposure.
+- **R8. CI.** After formal acceptance, one isolated commit adds, after the existing
+  `validate:grounding` and `validate:decision-engine` steps: `validate:plan-status`,
+  `validate:completeness`, `validate:due-day`, `validate:data-status`. Not made yet.
+- **R9. The fixture-driven Playwright harness (96 captures, 28+ flows incl. the new gating flows)
+  lives outside the repo.** Recommend moving it under `scripts/qa/` with a pinned dev dependency
+  so the wiring (not only the pure logic) is regression-tested. Needs your go (adds a dependency).
 
-- `supabase/migrations/<timestamp>_debts_due_day.sql` (new)
-- `src/integrations/supabase/types.ts` (regenerate, do not hand-edit)
-- `src/lib/money.ts` (`Debt.due_day`)
-- `src/lib/due-day.ts` (new helper) and the `dueDate: null` line in `buildEngineInput` (`src/lib/mm.ts`)
-- `src/routes/_authenticated/debt.tsx`: due-day input on the add form, an edit path for existing
-  debts (minimum and due day), and a "due the 15th" display
-- `src/routes/_authenticated/money-meeting.tsx:209-220`: the assistant's hand-built debt payload
-  passes the same computed date instead of `null` (two sites must change together)
-- Wording only: `src/lib/grounding.ts` (comments / strings stating there is "no due-date column")
-  and `src/lib/mm-chat.functions.ts:138-139` (prompt). These are PR #10 locked files; see ruling 6.
-- `src/components/overview/paycheck-briefing.tsx`: per-debt "add due day" links (the incomplete
-  state UI, already built; only the link targets deepen)
-- New cases in `scripts/prove-decision-engine.ts` / `prove-grounding.ts` for the helper
+## 8. Known limits of the debt-timing design (state these wherever the plan is described)
 
-### 3.3 Alternatives considered
+- A due day that already passed this month resolves to NEXT month, so an unpaid earlier-this-month
+  minimum drops out of the window without being flagged (same class as overdue bills). The product
+  cannot tell paid from unpaid.
+- `debt_payments` is never read: a minimum already paid this cycle still counts until its date
+  passes (a conservative over-count that can show a spurious shortfall).
+- Monthly only; one occurrence per window (a window long enough to contain the due day twice
+  counts it once). A minimum due ON payday counts.
+- "Today" is the UTC date (`money.ts`), so on a US evening it is already tomorrow; a due day equal
+  to the local date can roll a month. The engine's hook also fixes `todayIso` at first render, so
+  a tab left open past midnight keeps the old window. Both pre-date this work and apply to bills
+  too; recommend a local-date follow-up.
+- The Money Meeting lowest-point projection runs over planned bills and income only, never debt
+  minimums; it now says "before any debt minimums" whenever an active debt exists.
+- Recurring bills with a stale stored date and overdue unpaid bills still vanish from the plan.
 
-- **A. No schema change: due day in browser `localStorage`.** Fast, no governance question, but
-  not durable, not shared across devices, absent from the data export, and misleading as evidence
-  about a durable product. Acceptable only for a moderated single-device usability check; not a
-  shippable data model, and it would not satisfy "resolved for the prototype".
-- **B. No schema change: link each debt to a recurring bill (`planned_expenses`, category debt).**
-  Rejected. The link would be a name convention with no integrity, two sources of truth for the
-  minimum, and the engine does not roll recurring bills forward, so after the first date passes the
-  debt silently leaves the plan while looking "known". It needs the same roll-forward helper as C,
-  so it is not smaller.
+## 9. Evidence index
 
-### 3.4 Known limits of C (stated, not hidden)
-
-- Monthly only. A weekly / biweekly / semimonthly debt payment is not expressible; it stays unknown
-  (incomplete) or is entered approximately. A later `payment_frequency` column extends C without
-  redoing it.
-- One occurrence per debt: a window exactly one month wide whose end falls on the due day under-
-  counts one payment in a rare corner.
-- `debt_payments` is not read, so a minimum already paid this cycle still counts until its due date
-  passes (a conservative over-count that can show a spurious shortfall). Reading it is a separate
-  product decision.
-- A minimum due ON payday counts in this window (inclusive end, as for bills).
-
-### 3.5 Classifier gaps that must be decided before the incomplete trigger ships to real users
-
-- A paid-off, un-archived debt with a minimum and a $0 balance is still "unknown timing" (the Debt
-  page reduces the balance on a logged payment but does not archive), so it would hold the plan
-  incomplete forever. This pass follows the engine exactly and does NOT filter it.
-- An active debt with balance > 0 but no minimum entered is in neither the plan nor the unknown list
-  (the form calls the minimum "optional"), so it vanishes silently.
-
-### 3.6 Same trust class, out of scope
-
-Recurring bills with a stale stored `due_date`, and overdue unpaid bills, silently drop out of the
-plan. Not addressed here; flagged so it is a decision, not a surprise.
-
-### 3.7 Governance
-
-The prototype has its own Supabase project (`.env.example`), and the production repo is
-untouched. The migration FILE is what would later carry to production, so it is treated as a
-governed schema change. It is not applied, committed, or pushed in this pass. It is also not
-determinable from the repo whether pushing a migration file to this Lovable-connected branch
-auto-applies it to the prototype database; that must be confirmed before any push.
-
-### 3.8 Pre-existing data-loading risks that the incomplete state now depends on
-
-Found by the independent review of this diff; neither is changed here.
-
-- The money-state queries (`src/hooks/use-money-state.ts`) swallow errors (`data ?? []`). If the
-  debts query fails, the briefing computes from "no debts" and shows a healthy, complete-looking
-  plan with the required debt missing, which is the exact false-complete failure this work exists
-  to prevent. A small fix (surface the error and show an error state instead of a figure) is
-  proposed but not made, because it changes shared data loading.
-- `loading` waits for profile, accounts, expenses, debts and goals but not reserved funds, caps or
-  overrides, so the first paint can show a larger remainder before those arrive.
-
-## 4. Rulings needed (default = what this pass assumed)
-
-1. **Approve Option C** (additive `debts.due_day`, prototype project, migration file carried to
-   production later under separate governance). Without it the healthy COMPLETE proof with debts
-   cannot be produced and Definition-of-Done item 2 stays open. Alternative: a healthy stimulus
-   with no debts is genuinely complete today, but it does not resolve debt timing.
-2. **Monthly day-of-month timing sufficient for the prototype?** Default yes.
-3. **Paid-off ($0 balance), un-archived debts and debts with no minimum:** default follows the
-   engine exactly (the first holds the plan incomplete; the second is ignored). Excluding $0-balance
-   debts is possible inside `plan-status.ts` without touching locked files (it already receives the
-   engine input), but then the Overview would call a plan complete while the engine's own headline
-   and the assistant still say debt timing is incomplete. Matching them exactly needs an engine
-   change, which touches the locked PR #10 surface. This is a design call, not a technical limit.
-4. **Incomplete + known shortfall:** default is incomplete dominates, and the known shortfall is
-   shown as a lower bound ("Known-item shortfall (partial) ... could be larger").
-5. **Partial figure visible or hidden:** default visible but subordinate, per the ruling's example.
-   Hiding the dollar figure entirely in the incomplete state is the stricter alternative.
-6. **Cross-surface consistency.** The assistant's grounded `plan_complete` claim reads
-   `snap.complete` (setup-complete). It can say "the plan is complete" while the Overview says "not
-   final". Reconciling it means touching `grounding.ts` / `decision-engine.ts` (PR #10 locked) and
-   re-running its 157 + 13 proofs. Default: Overview only, flagged as a known inconsistency.
-7. **Debt-free card beside an incomplete plan.** It still shows a payoff date ("Aug 2029") under an
-   incomplete banner; a reviewer called the focus line and this card "pulling in different
-   directions". Default: unchanged (the ruling's KEEP list does not name the cards).
-8. **Next focus for a complete plan.** Default: the earliest-due item in the plan, stated as fact
-   ("Electric bill, $85.00, is due October 12."), with no advice on what to do with the remainder.
-9. **Free-text "Your focus" removed from the Overview** (it was the onboarding goal string, not
-   derived from the plan). Default: removed.
-10. **CI:** wire `validate:plan-status` into `ci.yml`? Default: no, until signed off.
-11. **Fix the two data-loading risks in Section 3.8** (surface query errors; wait for every query
-    the engine reads before showing a figure). Default: not changed in this pass.
-12. **Instrument:** confirm the corrected instrument (eligibility attestation, D1 / D2, 48-72 hour
-    collection, 5 entirely new participants) is frozen only AFTER the proofs are approved, and that
-    rubric items B and E are re-worded to match the new screen.
-
-## 5. Sequencing and what is blocked
-
-1. CEO rules on Section 4 (item 1 gates everything below it).
-2. On approval of C: migration + types + helper + debt page + assistant payload + proofs, then the
-   healthy COMPLETE-plan proof (debts with due days: one placed in the window, one outside it) and
-   a regenerated incomplete proof.
-3. CEO approves the exact proofs. Only then: freeze the new stimulus, freeze the corrected
-   instrument, run the five-person study within 48-72 hours of the freeze, score once.
-4. Gate 3 readiness (planning only, no production port) proceeds in parallel and is not started in
-   this pass.
-
-## 6. Evidence index
-
-Captures, per-state text dumps, axe results, and interaction-flow screenshots are in the
-accompanying proof folder (`Remediation Proofs - 2026-10-09`). Headline pair:
-`incomplete-plan__*` and `healthy-complete-interim__*`. The healthy capture is INTERIM: it uses a
-scenario with no required debt minimums because debt due days cannot be captured until Section 3
-lands, so it is not a candidate freeze stimulus.
+Proofs (all network-free, mutation-checked): `npm run validate:` `grounding` 157/157,
+`decision-engine` 13/13 (both unedited), `plan-status` 49, `completeness` 37, `due-day` 13,
+`data-status` 30. Typecheck: only the pre-existing `src/routes/__root.tsx` error, identical at
+baseline. Captures and flows: see the return package README (counts and the final CI result for
+the exact SHA are recorded there, not here, because they are produced after this file is
+committed).
