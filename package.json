@@ -16,7 +16,8 @@
     "validate:decision-engine": "tsx scripts/prove-decision-engine.ts",
     "validate:plan-status": "tsx scripts/prove-plan-status.ts",
     "validate:completeness": "tsx scripts/prove-completeness.ts",
-    "validate:due-day": "tsx scripts/prove-due-day.ts"
+    "validate:due-day": "tsx scripts/prove-due-day.ts",
+    "validate:data-status": "tsx scripts/prove-data-status.ts"
   },
   "dependencies": {
     "@fontsource/fraunces": "^5.2.9",
