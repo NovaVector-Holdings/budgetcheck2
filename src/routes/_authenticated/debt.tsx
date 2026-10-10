@@ -2,8 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { fmt, type Debt } from "@/lib/money";
-import { ordinalDay, parseDueDayInput } from "@/lib/due-day";
+import { fmt, today, type Debt } from "@/lib/money";
+import { ordinalDay, parseDueDayInput, resolveDebtDueDate } from "@/lib/due-day";
+import { classifyDebt } from "@/lib/decision-engine";
 import { DebtFreeDate } from "@/components/debt-free-date";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +12,41 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** What this debt is missing for the paycheck plan, decided by the ENGINE's own
+ *  classifier (never re-derived here), so this prompt and the Overview's PLAN
+ *  INCOMPLETE banner always agree about which debts need what. */
+function DebtNeedsInput({ d, onFix }: { d: Debt; onFix: () => void }) {
+  const cls = classifyDebt(
+    {
+      id: d.id,
+      creditor: d.name,
+      balance: Number(d.balance),
+      apr: d.apr,
+      minPayment: d.minimum_payment,
+      dueDate: resolveDebtDueDate(d, today()),
+    },
+    () => false,
+  );
+  if (cls !== "unknown_minimum" && cls !== "unknown_timing") return null;
+  const minimum = cls === "unknown_minimum";
+  return (
+    <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-r-md border-l-4 border-gold bg-gold/15 px-3 py-2 text-sm text-ink">
+      <span>
+        {minimum
+          ? "Minimum payment not entered, so this debt can't be placed in your paycheck plan."
+          : "Due day not entered, so this payment can't be placed in your paycheck plan."}
+      </span>
+      <button
+        type="button"
+        onClick={onFix}
+        className="font-medium text-ink underline underline-offset-2"
+      >
+        {minimum ? "Add minimum payment" : "Add due day"}
+      </button>
+    </p>
+  );
+}
 
 export const Route = createFileRoute("/_authenticated/debt")({
   // ?edit=<debtId> opens that debt's inline editor (the Overview links here to
@@ -410,6 +446,7 @@ function DebtPage() {
                 </span>
               )}
             </div>
+            {editId !== d.id && <DebtNeedsInput d={d} onFix={() => openEdit(d)} />}
             <div className="mt-4 flex flex-wrap gap-2">
               <Button
                 size="sm"

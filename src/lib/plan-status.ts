@@ -1,7 +1,7 @@
 import type { EngineInput, EngineSnapshot, MissingInput } from "./decision-engine";
 import { formatDay } from "./decision-engine";
-import type { BalanceSource } from "./mm";
-import { fmt } from "./money";
+import { balanceSource, spendableAccounts, type BalanceSource, type MmAccount } from "./mm";
+import { fmt, type Profile } from "./money";
 
 // Gate 2 remediation -- the paycheck plan's COMPLETENESS state.
 //
@@ -17,19 +17,22 @@ import { fmt } from "./money";
 // This file is a PURE derivation over the one governed engine snapshot
 // (computeSnapshot, the same result Money Meeting / Weekly Check-in / Ask a
 // Question use). It introduces no new money math and no new notion of "due":
-//   - "incomplete" is exactly `funding.debtsWithUnknownTiming.length > 0`,
-//     the engine's own list of required minimums it refuses to place without
-//     guessing;
+//   - "incomplete" is exactly the engine's own `snapshot.planComplete === false`
+//     once setup is on file: an ACTIVE debt whose due day is unknown
+//     (`funding.debtsWithUnknownTiming`) or whose minimum payment is unknown
+//     (`funding.debtsWithUnknownMinimum`). The assistant's "the plan is
+//     complete" claim reads the SAME flag (SME/CEO return: one semantic
+//     truth, fixed at the engine), so the two surfaces cannot disagree;
 //   - every dollar below is read from, or a straight sum/difference of,
 //     fields the engine already produced (`available`, `totalRequested`,
 //     `reservedTotal`, `safeBuffer`, ...), and the proof script asserts the
 //     displayed footing rows sum to the engine's own remainder.
 // `EngineSnapshot.complete` is deliberately NOT used: it means "setup is
-// complete" (balance / payday / cadence on file), a different question, and
-// the assistant's grounding layer depends on that meaning staying put.
+// complete" (balance / payday / cadence on file), a different question.
 //
-// Nothing in this file touches decision-engine.ts or grounding.ts (the PR #10
-// trust-gate surface).
+// All user-facing copy for the incomplete state lives here (not in the
+// component) so scripts/prove-plan-status.ts can prove exactly what a person
+// is told, in every combination of reasons.
 
 /** One row of the visible calculation. `amount` is SIGNED: it is what the row
  *  contributes to the remainder, so the rows always sum to `remainder`. */
@@ -47,12 +50,15 @@ export interface KeepItem {
   dueDate: string | null;
 }
 
-/** A required debt minimum BudgetChek cannot place in any paycheck window
- *  because its due date was never entered. Never guessed. */
+/** An ACTIVE debt BudgetChek cannot place in the paycheck plan, and why:
+ *  "timing" = a real minimum whose due day was never entered; "minimum" = the
+ *  minimum payment itself is not on file. Neither is ever guessed. */
 export interface UnplacedDebt {
   id: string;
   name: string;
-  minPayment: number;
+  /** The known minimum; null when the minimum itself is the missing piece. */
+  minPayment: number | null;
+  reason: "timing" | "minimum";
 }
 
 interface Calculated {
@@ -82,7 +88,17 @@ export type PlanStatus =
   | (Calculated & {
       kind: "incomplete";
       unplaced: UnplacedDebt[];
+      /** Sum of the KNOWN minimums among `unplaced`. Meaningless as "the
+       *  total owed" while any minimum is unknown (see `hasUnknownAmount`). */
       unplacedTotal: number;
+      reasons: { timing: boolean; minimum: boolean };
+      /** True when at least one required minimum is not on file, so no dollar
+       *  total of "what's missing" can be stated honestly. */
+      hasUnknownAmount: boolean;
+      headline: string;
+      lead: string;
+      totalLabel: string;
+      ctaLabel: string;
     })
   | (Calculated & { kind: "shortfall"; short: number })
   | (Calculated & { kind: "healthy"; status: string })
@@ -129,11 +145,25 @@ export function derivePlanStatus(
   const floorAdj = round2(floored - base);
   const inflows = round2(funding.available - floored);
 
-  const unplaced: UnplacedDebt[] = funding.debtsWithUnknownTiming.map((d) => ({
-    id: d.id,
-    name: d.creditor,
-    minPayment: d.minPayment,
-  }));
+  // ONE definition of "incomplete": the engine's planComplete (setup is on
+  // file at this point, so it reduces to the two debt lists). Both lists are
+  // read here only to NAME what is missing.
+  const order = new Map(input.obligations.debts.map((d, i) => [d.id, i]));
+  const unplaced: UnplacedDebt[] = [
+    ...funding.debtsWithUnknownTiming.map((d): UnplacedDebt => ({
+      id: d.id,
+      name: d.creditor,
+      minPayment: d.minPayment,
+      reason: "timing",
+    })),
+    ...funding.debtsWithUnknownMinimum.map((d): UnplacedDebt => ({
+      id: d.id,
+      name: d.creditor,
+      minPayment: null,
+      reason: "minimum",
+    })),
+  ].sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+  const incomplete = !snap.planComplete || unplaced.length > 0;
 
   const footing: FootingRow[] = [{ key: "balance", label: "Balance", amount: balance }];
   if (funding.items.length > 0) {
@@ -141,7 +171,7 @@ export function derivePlanStatus(
       key: "keep",
       // When the plan is incomplete these are only the items BudgetChek can
       // place, and the label says so.
-      label: `Keep available for ${funding.items.length}${unplaced.length > 0 ? " known" : ""} item${funding.items.length === 1 ? "" : "s"}`,
+      label: `Keep available for ${funding.items.length}${incomplete ? " known" : ""} item${funding.items.length === 1 ? "" : "s"}`,
       amount: -requested,
     });
   }
@@ -187,16 +217,61 @@ export function derivePlanStatus(
   // INCOMPLETE dominates everything else, including a known shortfall: a
   // known shortfall is then only a LOWER BOUND (the unplaced minimums can only
   // add to it), and the UI says so rather than presenting it as the answer.
-  if (unplaced.length > 0) {
+  if (incomplete) {
+    const timing = unplaced.some((d) => d.reason === "timing");
+    const minimum = unplaced.some((d) => d.reason === "minimum");
+    const n = unplaced.length;
+    const one = n === 1;
+    const end = formatDay(window.end);
+    const knownTotal = round2(
+      unplaced.reduce((s, d) => s + (d.reason === "timing" ? (d.minPayment ?? 0) : 0), 0),
+    );
+    const timingRows = unplaced.filter((d) => d.reason === "timing").length;
+    // The approved timing-only wording is unchanged; the other reasons get
+    // their own honest sentence rather than a vague catch-all.
+    const copy =
+      timing && !minimum
+        ? {
+            headline: "Debt-payment timing is incomplete, so this paycheck plan is not final.",
+            lead: `BudgetChek doesn't know when ${one ? "this required payment is" : "these required payments are"} due, so it can't tell whether ${one ? "it belongs" : "they belong"} before ${end}:`,
+            ctaLabel: "Add due dates →",
+            nextFocus: one
+              ? `Add the due date for ${unplaced[0].name}.`
+              : "Add the due date for each payment listed above.",
+          }
+        : minimum && !timing
+          ? {
+              headline:
+                "A required debt payment amount is missing, so this paycheck plan is not final.",
+              lead: `BudgetChek doesn't have the minimum payment for ${one ? "this debt" : "these debts"}, so it can't tell how much ${one ? "it needs" : "they need"} before ${end}:`,
+              ctaLabel: one ? "Add the minimum payment →" : "Add minimum payments →",
+              nextFocus: one
+                ? `Add the minimum payment for ${unplaced[0].name}.`
+                : "Add the minimum payment for each debt listed above.",
+            }
+          : {
+              headline: "Debt-payment details are incomplete, so this paycheck plan is not final.",
+              lead: `BudgetChek is missing details for ${one ? "this debt" : "these debts"}, so it can't tell whether or how much ${one ? "it needs" : "they need"} before ${end}:`,
+              ctaLabel: "Add debt details →",
+              nextFocus: one
+                ? `Add the missing details for ${unplaced[0].name}.`
+                : "Add the missing details for each debt listed above.",
+            };
     return {
       kind: "incomplete",
       ...common,
       unplaced,
-      unplacedTotal: round2(unplaced.reduce((s, d) => s + d.minPayment, 0)),
-      nextFocus:
-        unplaced.length === 1
-          ? `Add the due date for ${unplaced[0].name}.`
-          : "Add the due date for each payment listed above.",
+      unplacedTotal: knownTotal,
+      reasons: { timing, minimum },
+      hasUnknownAmount: minimum,
+      headline: copy.headline,
+      lead: copy.lead,
+      totalLabel:
+        timingRows > 1 && !minimum
+          ? "Not yet placed in this paycheck"
+          : "Known minimums not yet placed",
+      ctaLabel: copy.ctaLabel,
+      nextFocus: copy.nextFocus,
     };
   }
 
@@ -234,4 +309,32 @@ export function derivePlanStatus(
       ? `${next.label}, ${fmt(next.amount)}, is due ${formatDay(next.dueDate)}.`
       : `${next.label}, ${fmt(next.amount)}, is the next item to cover.`,
   };
+}
+
+/** What every Overview surface reads: the status, plus the context that
+ *  produced it (the setup state's inline balance form needs the source and
+ *  "as of" date, which the `setup` status itself does not carry). */
+export interface PlanView {
+  status: PlanStatus;
+  ctx: PlanStatusContext;
+}
+
+/** The ONE place the Overview turns loaded money state into a PlanStatus, so
+ *  the briefing and the Debt-free card are guaranteed to read the same one.
+ *  Pure; callers must only invoke it once the data gate says "ready". */
+export function planStatusFromState(s: {
+  profile: Profile | null;
+  accounts: MmAccount[];
+  snapshot: EngineSnapshot;
+  engineInput: EngineInput;
+}): PlanView {
+  const source = balanceSource(s.profile, s.accounts);
+  const ctx: PlanStatusContext = {
+    balanceSource: source,
+    balanceAsOf:
+      source === "accounts"
+        ? oldestAsOf(spendableAccounts(s.accounts).map((a) => a.balance_as_of))
+        : (s.profile?.balance_as_of ?? null),
+  };
+  return { status: derivePlanStatus(s.snapshot, s.engineInput, ctx), ctx };
 }

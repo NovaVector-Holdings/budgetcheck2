@@ -4,9 +4,11 @@
 //
 // What this proves, against the REAL engine (computeSnapshot is called, never
 // hand-built):
-//   1. A required debt minimum with no known due date makes the plan
-//      "incomplete" -- and only that does. Known dates, dates outside the
-//      window, and debts with no minimum never do.
+//   1. The plan is "incomplete" exactly when the ENGINE says so
+//      (snapshot.planComplete === false once setup is on file): an ACTIVE debt
+//      (balance > 0) whose due day is unknown, or whose minimum payment is
+//      unknown (SME/CEO return). Known dates, dates outside the window, a
+//      PAID-OFF debt (balance <= 0) and an explicit $0 minimum never do.
 //   2. Incomplete DOMINATES: it wins over a known shortfall and over an empty
 //      window, and the engine's own `complete` flag (setup-complete) is left
 //      alone -- plan-status is a separate derivation, not a repurposing.
@@ -19,6 +21,10 @@
 //      healthy state never repeats the remainder figure in its status text.
 //   5. balanceSource tells "no balance on file" apart from a real $0 and
 //      follows the same accounts-over-profile precedence buildEngineInput uses.
+//   6. The exact words a person is told, for every combination of reasons
+//      (timing only / minimum only / both), and that the Debt-free goal card
+//      never shows a confident payoff date when the date would be built on a
+//      missing minimum, and qualifies it when only due days are missing.
 //
 // Run with: npx tsx scripts/prove-plan-status.ts
 
@@ -30,9 +36,15 @@ import {
   type ReservedFund,
   type PendingFlow,
 } from "../src/lib/decision-engine";
-import { derivePlanStatus, oldestAsOf, type PlanStatus } from "../src/lib/plan-status";
+import {
+  derivePlanStatus,
+  oldestAsOf,
+  planStatusFromState,
+  type PlanStatus,
+} from "../src/lib/plan-status";
 import { balanceSource, buildEngineInput, type MmAccount } from "../src/lib/mm";
-import type { Profile } from "../src/lib/money";
+import { debtFreeCardState, joinDebtNames } from "../src/lib/debt-free-card";
+import type { Debt, Profile } from "../src/lib/money";
 
 let pass = 0;
 let fail = 0;
@@ -181,12 +193,46 @@ function footsToEngine(f: Fixture): boolean {
 }
 
 {
+  // SME/CEO return, REVERSING the first version of this case: an ACTIVE debt
+  // with an UNKNOWN minimum (null) used to vanish and read as "healthy". It now
+  // makes the plan incomplete. An explicit $0 minimum is the person saying "no
+  // payment is required" -- known, so still complete.
   const a = status({ debts: [debt({ minPayment: null })], bills: [bill()] }).ps;
   const b = status({ debts: [debt({ minPayment: 0 })], bills: [bill()] }).ps;
   record(
-    "COMPLETE 3: a debt with no (or $0) minimum is not a required payment -> never makes the plan incomplete",
-    a.kind === "healthy" && b.kind === "healthy",
+    "COMPLETE 3: an explicit $0 minimum is KNOWN (no payment required) -> complete; a NULL minimum is unknown -> incomplete",
+    b.kind === "healthy" && a.kind === "incomplete",
     `${a.kind} / ${b.kind}`,
+  );
+  record(
+    "INCOMPLETE 3: an active debt with no minimum on file is named, flagged 'minimum' (not 'timing'), and has no dollar amount",
+    a.kind === "incomplete" &&
+      a.unplaced.length === 1 &&
+      a.unplaced[0].reason === "minimum" &&
+      a.unplaced[0].minPayment === null &&
+      a.hasUnknownAmount === true &&
+      a.reasons.minimum === true &&
+      a.reasons.timing === false,
+    JSON.stringify(a),
+  );
+}
+
+{
+  // A PAID-OFF debt (balance <= 0) is not a required current payment, whatever
+  // minimum / due day is still on the row.
+  const noDate = status({ debts: [debt({ balance: 0, minPayment: 45 })], bills: [bill()] }).ps;
+  const nullMin = status({ debts: [debt({ balance: 0, minPayment: null })], bills: [bill()] }).ps;
+  const inWin = status({
+    debts: [debt({ balance: 0, minPayment: 45, dueDate: "2026-10-14" })],
+    bills: [bill()],
+  }).ps;
+  record(
+    "COMPLETE 5: a PAID-OFF debt never holds the plan incomplete (undated, null minimum, or dated in the window) and never enters Keep available",
+    noDate.kind === "healthy" &&
+      nullMin.kind === "healthy" &&
+      inWin.kind === "healthy" &&
+      !inWin.keepItems.some((k) => /Visa/.test(k.label)),
+    `${noDate.kind} / ${nullMin.kind} / ${inWin.kind}`,
   );
 }
 
@@ -196,6 +242,77 @@ function footsToEngine(f: Fixture): boolean {
     "COMPLETE 4: no debts at all + covered known bills -> healthy, never 'incomplete'",
     ps.kind === "healthy",
     ps.kind,
+  );
+}
+
+// ---- 1b. exactly what a person is told, per reason ----------------------------
+
+{
+  const timingOne = status({ debts: [debt()], bills: [bill()] }).ps;
+  const timingMany = status({
+    debts: [
+      debt({ id: "d1", creditor: "Visa card" }),
+      debt({ id: "d2", creditor: "Store card", minPayment: 25 }),
+    ],
+    bills: [bill()],
+  }).ps;
+  const minOne = status({ debts: [debt({ minPayment: null })], bills: [bill()] }).ps;
+  const minMany = status({
+    debts: [
+      debt({ id: "d1", creditor: "Visa card", minPayment: null }),
+      debt({ id: "d2", creditor: "Store card", minPayment: null }),
+    ],
+    bills: [bill()],
+  }).ps;
+  const both = status({
+    debts: [
+      debt({ id: "d1", creditor: "Visa card", minPayment: null }),
+      debt({ id: "d2", creditor: "Store card", minPayment: 25 }),
+    ],
+    bills: [bill()],
+  }).ps;
+  const pick = (ps: PlanStatus) => (ps.kind === "incomplete" ? ps : null);
+  record(
+    "COPY 1: timing-only keeps the APPROVED headline and 'Add due dates' wording exactly",
+    pick(timingOne)?.headline ===
+      "Debt-payment timing is incomplete, so this paycheck plan is not final." &&
+      pick(timingOne)?.ctaLabel === "Add due dates →" &&
+      pick(timingMany)?.headline === pick(timingOne)?.headline &&
+      pick(timingMany)?.nextFocus === "Add the due date for each payment listed above." &&
+      pick(timingMany)?.totalLabel === "Not yet placed in this paycheck" &&
+      pick(timingMany)?.unplacedTotal === 60,
+    JSON.stringify([pick(timingOne), pick(timingMany)]),
+  );
+  record(
+    "COPY 2: minimum-only gets its OWN honest sentence (never 'timing'), singular and plural",
+    pick(minOne)?.headline ===
+      "A required debt payment amount is missing, so this paycheck plan is not final." &&
+      pick(minOne)?.nextFocus === "Add the minimum payment for Visa card." &&
+      pick(minOne)?.ctaLabel === "Add the minimum payment →" &&
+      pick(minMany)?.nextFocus === "Add the minimum payment for each debt listed above." &&
+      pick(minMany)?.ctaLabel === "Add minimum payments →" &&
+      !/due/i.test(pick(minOne)?.headline ?? "") &&
+      !/due/i.test(pick(minOne)?.lead ?? ""),
+    JSON.stringify([pick(minOne), pick(minMany)]),
+  );
+  record(
+    "COPY 3: both reasons -> a neutral 'details' headline, the unplaced debts listed in the order they were entered, and the total labeled 'Known minimums'",
+    pick(both)?.headline ===
+      "Debt-payment details are incomplete, so this paycheck plan is not final." &&
+      pick(both)
+        ?.unplaced.map((d) => `${d.name}:${d.reason}`)
+        .join(",") === "Visa card:minimum,Store card:timing" &&
+      pick(both)?.totalLabel === "Known minimums not yet placed" &&
+      pick(both)?.unplacedTotal === 25 &&
+      pick(both)?.hasUnknownAmount === true,
+    JSON.stringify(pick(both)),
+  );
+  record(
+    "COPY 4: no state's headline or lead ever contains 'Estimated remaining' or a dollar figure (the remainder is not restated in the warning)",
+    [timingOne, timingMany, minOne, minMany, both].every(
+      (ps) =>
+        ps.kind === "incomplete" && !/Estimated remaining|\$/.test(ps.headline + " " + ps.lead),
+    ),
   );
 }
 
@@ -357,7 +474,16 @@ record(
   let badFocus = 0;
   for (const balance of [0, 40, 100, 640, 5000]) {
     for (const buffer of [0, 100, 700]) {
-      for (const debtCase of ["none", "unknown", "in-window", "out-of-window", "no-min"] as const) {
+      for (const debtCase of [
+        "none",
+        "unknown",
+        "in-window",
+        "out-of-window",
+        "no-min",
+        "zero-min",
+        "paid-off",
+        "paid-off-dated",
+      ] as const) {
         for (const billAmt of [0, 85, 900]) {
           for (const reserved of [0, 250]) {
             const debts =
@@ -369,7 +495,13 @@ record(
                     ? [debt({ dueDate: "2026-10-14" })]
                     : debtCase === "out-of-window"
                       ? [debt({ dueDate: "2026-11-02" })]
-                      : [debt({ minPayment: null })];
+                      : debtCase === "no-min"
+                        ? [debt({ minPayment: null })]
+                        : debtCase === "zero-min"
+                          ? [debt({ minPayment: 0 })]
+                          : debtCase === "paid-off"
+                            ? [debt({ balance: 0 })]
+                            : [debt({ balance: 0, dueDate: "2026-10-14" })];
             const f: Fixture = {
               balance,
               buffer,
@@ -385,8 +517,13 @@ record(
             const engine =
               Math.round((snap.funding!.available - snap.funding!.totalRequested) * 100) / 100;
             if (Math.abs(sum(ps) - engine) >= 0.005) badFoot++;
-            const unknown = snap.funding!.debtsWithUnknownTiming.length > 0;
+            const unknown =
+              snap.funding!.debtsWithUnknownTiming.length > 0 ||
+              snap.funding!.debtsWithUnknownMinimum.length > 0;
+            // ONE semantic truth: Overview "incomplete" <=> engine planComplete false
+            // <=> an unplaced debt is listed.
             if ((ps.kind === "incomplete") !== unknown) badKind++;
+            if ((ps.kind === "incomplete") !== !snap.planComplete) badKind++;
             if (typeof ps.nextFocus !== "string" || ps.nextFocus.trim().length === 0) badFocus++;
           }
         }
@@ -399,7 +536,7 @@ record(
     `${badFoot} mismatches`,
   );
   record(
-    `SWEEP (${n} states): 'incomplete' <=> engine lists an unplaced minimum, in every one`,
+    `SWEEP (${n} states): 'incomplete' <=> engine planComplete is false <=> an active debt is unplaced, in every one`,
     badKind === 0,
     `${badKind} mismatches`,
   );
@@ -474,6 +611,219 @@ record(
     "BALANCE 6: oldestAsOf picks the stalest date, ignores nulls",
     oldestAsOf(["2026-10-08", null, "2026-09-24"]) === "2026-09-24" &&
       oldestAsOf([null, undefined]) === null,
+  );
+}
+
+// ---- 7. Debt-free goal card + shared PlanView + balanceKnown ---------------------------
+
+{
+  const prof = (o: Partial<Profile> = {}): Profile =>
+    ({
+      id: "u",
+      cash_on_hand: 640,
+      spending_buffer: 100,
+      balance_as_of: "2026-10-08",
+      next_pay_date: PAYDAY,
+      pay_frequency: "biweekly",
+      ...o,
+    }) as unknown as Profile;
+  const row = (
+    id: string,
+    name: string,
+    balance: number,
+    minimum_payment: number | null,
+    due_day: number | null,
+    apr = 20,
+  ): Debt =>
+    ({
+      id,
+      user_id: "u",
+      name,
+      balance,
+      apr,
+      minimum_payment,
+      due_day,
+      archived: false,
+      created_at: "2026-09-01",
+    }) as unknown as Debt;
+  const run = (debts: Debt[], profile: Profile | null = prof()) => {
+    const engineInput = buildEngineInput({
+      todayIso: TODAY,
+      profile,
+      accounts: [],
+      reserved: [],
+      caps: [],
+      expenses: [],
+      debts,
+      goals: [],
+      savedByGoal: new Map<string, number>(),
+      overrides: [],
+    });
+    const snapshot = computeSnapshot(engineInput);
+    const view = planStatusFromState({ profile, accounts: [], snapshot, engineInput });
+    const card = debtFreeCardState({
+      debts,
+      obligations: engineInput.obligations.debts,
+      status: view.status,
+    });
+    return { engineInput, snapshot, view, card };
+  };
+
+  // all minimums known, due days known (one inside the window, two outside)
+  const dated = [
+    row("d1", "Visa card", 1450, 45, 14),
+    row("d2", "Store card", 640, 25, 24),
+    row("d3", "Personal loan", 700, 45, 5),
+  ];
+  const complete = run(dated);
+  record(
+    "CARD 1: complete plan (every debt has a minimum and a due day) -> healthy status AND an UNQUALIFIED payoff date",
+    complete.view.status.kind === "empty" || complete.view.status.kind === "healthy"
+      ? complete.card.kind === "estimate" && complete.card.dueDatesIncomplete === false
+      : false,
+    JSON.stringify([complete.view.status.kind, complete.card.kind]),
+  );
+  record(
+    "CARD 2: due-day placement is real -- Visa (due the 14th) lands INSIDE the window, Store card (24th) and Personal loan (5th -> Nov 5) outside",
+    complete.view.status.kind === "healthy" &&
+      complete.view.status.keepItems.map((k) => k.label).join("|") === "Visa card minimum",
+    JSON.stringify(complete.view.status),
+  );
+
+  // due days missing on some debts, every minimum known
+  const timing = run([
+    row("d1", "Visa card", 1450, 45, 14),
+    row("d2", "Store card", 640, 25, null),
+    row("d3", "Personal loan", 700, 45, null),
+  ]);
+  record(
+    "CARD 3: only due days missing -> the date is KEPT but QUALIFIED (dueDatesIncomplete), and the card's link target is the first debt missing a due day",
+    timing.view.status.kind === "incomplete" &&
+      timing.card.kind === "estimate" &&
+      timing.card.dueDatesIncomplete === true &&
+      timing.card.firstTimingId === "d2",
+    JSON.stringify([timing.view.status.kind, timing.card]),
+  );
+
+  // an active debt with NO minimum -> no date at all
+  const nomin = run([row("d1", "Visa card", 1450, null, 14), row("d2", "Store card", 640, 25, 24)]);
+  record(
+    "CARD 4: an active debt with an UNKNOWN minimum -> NO payoff date (it would be built on $0 for that debt); names it and links to it",
+    nomin.view.status.kind === "incomplete" &&
+      nomin.card.kind === "blocked" &&
+      nomin.card.names === "Visa card" &&
+      nomin.card.count === 1 &&
+      nomin.card.firstId === "d1",
+    JSON.stringify(nomin.card),
+  );
+
+  // even with NO payday yet (setup status, funding === null) the suppression still holds
+  const setupNoDate = run([row("d1", "Visa card", 1450, null, 14)], prof({ next_pay_date: null }));
+  record(
+    "CARD 5: the unknown-minimum suppression does NOT depend on a funding plan -- it still holds in the 'setup' status (no payday yet)",
+    setupNoDate.view.status.kind === "setup" && setupNoDate.card.kind === "blocked",
+    JSON.stringify([setupNoDate.view.status.kind, setupNoDate.card.kind]),
+  );
+
+  // paid-off debts are ignored; all-$0 rows get their own sentence
+  const paidOff = run([row("d1", "Old card", 0, 35, null)]);
+  const none = run([]);
+  record(
+    "CARD 6: paid-off ($0) debts never block or qualify the card; 'every debt at $0' is distinguished from 'no debts tracked'",
+    paidOff.card.kind === "no-debts" &&
+      (paidOff.card as { hadRows: boolean }).hadRows === true &&
+      none.card.kind === "no-debts" &&
+      (none.card as { hadRows: boolean }).hadRows === false &&
+      paidOff.view.status.kind !== "incomplete",
+    JSON.stringify([paidOff.card, none.card]),
+  );
+
+  // explicit zero minimums -> nothing to pay -> cannot estimate, with the existing copy
+  const zero = run([row("d1", "Visa card", 500, 0, null)]);
+  record(
+    "CARD 7: explicit $0 minimums (no payment required) are KNOWN -> plan complete, and the card says it cannot estimate yet (never a date)",
+    zero.view.status.kind !== "incomplete" &&
+      zero.card.kind === "cannot-estimate" &&
+      zero.card.reason === "no-payment",
+    JSON.stringify([zero.view.status.kind, zero.card]),
+  );
+  record(
+    "CARD 8: names are joined without a count word the assistant's entity-count guard would misread ('Visa card and 2 other debts')",
+    joinDebtNames(["A"]) === "A" &&
+      joinDebtNames(["A", "B"]) === "A and B" &&
+      joinDebtNames(["A", "B", "C"]) === "A and 2 other debts",
+  );
+
+  // balanceKnown reaches the engine: an absent balance is a SETUP gap, not a real $0
+  const noBal = run([], prof({ cash_on_hand: null, balance_as_of: null }));
+  record(
+    "BALANCE 7: no balance on file -> the ENGINE reports it missing (balanceKnown=false): complete and planComplete are false and the Overview is in 'setup'",
+    noBal.engineInput.account.balanceKnown === false &&
+      noBal.snapshot.missing.some((m) => m.field === "balance") &&
+      noBal.snapshot.complete === false &&
+      noBal.snapshot.planComplete === false &&
+      noBal.view.status.kind === "setup" &&
+      noBal.view.status.needsBalance === true,
+    JSON.stringify(noBal.snapshot.missing),
+  );
+  record(
+    "BALANCE 8: a real $0 balance on file stays a legitimate calculation (balanceKnown=true)",
+    run([], prof({ cash_on_hand: 0 })).engineInput.account.balanceKnown === true,
+  );
+
+  // planStatusFromState: one derivation, shared context
+  record(
+    "VIEW 1: planStatusFromState carries the source and the OLDEST 'as of' date, so the setup state's inline balance form is never shown a fresher date than the data has",
+    (() => {
+      const accts = [
+        {
+          id: "a1",
+          user_id: "u",
+          name: "A",
+          kind: "checking",
+          institution: null,
+          current_balance: 300,
+          credit_limit: null,
+          balance_as_of: "2026-10-08",
+          archived: false,
+        },
+        {
+          id: "a2",
+          user_id: "u",
+          name: "B",
+          kind: "cash",
+          institution: null,
+          current_balance: 340,
+          credit_limit: null,
+          balance_as_of: "2026-09-24",
+          archived: false,
+        },
+      ] as unknown as MmAccount[];
+      const profile = prof();
+      const engineInput = buildEngineInput({
+        todayIso: TODAY,
+        profile,
+        accounts: accts,
+        reserved: [],
+        caps: [],
+        expenses: [],
+        debts: [],
+        goals: [],
+        savedByGoal: new Map<string, number>(),
+        overrides: [],
+      });
+      const v = planStatusFromState({
+        profile,
+        accounts: accts,
+        snapshot: computeSnapshot(engineInput),
+        engineInput,
+      });
+      return (
+        v.ctx.balanceSource === "accounts" &&
+        v.ctx.balanceAsOf === "2026-09-24" &&
+        engineInput.account.currentBalance === 640
+      );
+    })(),
   );
 }
 

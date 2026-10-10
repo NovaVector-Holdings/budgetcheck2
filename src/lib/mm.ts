@@ -221,7 +221,16 @@ export function buildEngineInput(args: {
 
   return {
     todayIso,
-    account: { currentBalance: Number.isFinite(currentBalance) ? currentBalance : 0, pendingOutflows, pendingInflows, reservedFunds },
+    account: {
+      currentBalance: Number.isFinite(currentBalance) ? currentBalance : 0,
+      // currentBalance collapses an absent balance to a placeholder 0; this
+      // tells the engine it was never actually entered, so neither `complete`
+      // nor `planComplete` can claim a finished plan on a balance nobody gave us.
+      balanceKnown: balanceSource(profile, accounts) !== "none",
+      pendingOutflows,
+      pendingInflows,
+      reservedFunds,
+    },
     cycle: {
       lastDepositDate: null,
       nextDepositDate: profile?.next_pay_date ?? null,

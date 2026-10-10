@@ -96,7 +96,11 @@ export function WeeklyCheckIn({ userId, state, onGoToData }: { userId: string; s
   const focusLine = shortfall
     ? `Close the gap at ${cutoffItem?.label ?? "the cutoff line"} before anything else competes for the same dollar.`
     : funding && funding.items.length > 0 && snap.window
-      ? `Keep the ${fmt(funding.totalRequested)} due through ${formatDay(snap.window.end)} covered. Your estimated remaining after that and your buffer is ${fmt(remaining ?? 0)}.`
+      ? snap.planComplete
+        ? `Keep the ${fmt(funding.totalRequested)} due through ${formatDay(snap.window.end)} covered. Your estimated remaining after that and your buffer is ${fmt(remaining ?? 0)}.`
+        : // SME/CEO return: while a required debt payment can't be placed the
+          // plan is not final, so no remainder is offered to plan around.
+          `Keep the ${fmt(funding.totalRequested)} due through ${formatDay(snap.window.end)} covered. Debt payments aren't fully placed yet, so there's no final remainder to plan around.`
       : "Nothing urgent this week — a good week to move something toward a goal instead.";
 
   const doneCount = checklist.filter((c) => c.done).length;
@@ -154,13 +158,24 @@ export function WeeklyCheckIn({ userId, state, onGoToData }: { userId: string; s
           </div>
           <div>
             <p className="text-xs text-muted-foreground">
-              {shortfall ? "Short by" : "Estimated remaining"}
+              {!snap.planComplete
+                ? shortfall
+                  ? "Known-item shortfall (partial)"
+                  : "Known-item remainder (partial)"
+                : shortfall
+                  ? "Short by"
+                  : "Estimated remaining"}
             </p>
             <p className={`mt-1 font-serif text-2xl ${shortfall ? "text-destructive" : "text-ink"}`}>
               {remaining != null ? fmt(Math.abs(remaining)) : "—"}
             </p>
           </div>
         </div>
+        {!snap.planComplete && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Required debt payments aren't all placed yet, so this is not the final remainder.
+          </p>
+        )}
         <p className="mt-3 text-sm text-ink">{snap.headline}</p>
         {state.engineInput.safeBuffer > 0 && (
           <p className="mt-1 text-xs text-muted-foreground">{fmt(state.engineInput.safeBuffer)} buffer kept aside.</p>

@@ -2,14 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { fmt } from "@/lib/money";
 import { formatDay, formatShort } from "@/lib/decision-engine";
-import { balanceSource, spendableAccounts } from "@/lib/mm";
-import {
-  derivePlanStatus,
-  oldestAsOf,
-  type FootingRow,
-  type KeepItem,
-  type PlanStatus,
-} from "@/lib/plan-status";
+import type { FootingRow, KeepItem, PlanStatus, PlanView } from "@/lib/plan-status";
 import { Button } from "@/components/ui/button";
 import { BalanceForm, BalanceLine } from "@/components/overview/balance-update";
 import type { useMoneyState } from "@/hooks/use-money-state";
@@ -265,24 +258,33 @@ function IncompleteBriefing({
 
       <div className="mt-4 rounded-lg border-l-4 border-gold bg-gold/15 p-5">
         <p className="text-xs font-medium uppercase tracking-wide text-ink">Plan incomplete</p>
-        <h2 className="mt-1 font-serif text-2xl leading-snug text-ink">
-          Debt-payment timing is incomplete, so this paycheck plan is not final.
-        </h2>
-        <p className="mt-2 text-sm leading-relaxed text-ink">
-          BudgetChek doesn't know when{" "}
-          {many ? "these required payments are" : "this required payment is"} due, so it can't tell
-          whether {many ? "they belong" : "it belongs"} before {formatDay(status.windowEnd)}:
-        </p>
-        <ul className="mt-3 space-y-1.5">
+        <h2 className="mt-1 font-serif text-2xl leading-snug text-ink">{status.headline}</h2>
+        <p className="mt-2 text-sm leading-relaxed text-ink">{status.lead}</p>
+        <ul className="mt-3 space-y-2">
           {status.unplaced.map((d) => (
-            <li key={d.id} className="flex items-baseline justify-between gap-3 text-sm text-ink">
-              <span>{d.name} minimum</span>
-              <span className="font-medium">{fmt(d.minPayment)}</span>
+            <li
+              key={d.id}
+              className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-sm text-ink"
+            >
+              <span>
+                {d.name}
+                {d.reason === "timing" ? " minimum" : ""}
+                <Link
+                  to="/debt"
+                  search={{ edit: d.id }}
+                  className="ml-2 text-xs font-medium text-ink underline underline-offset-2"
+                >
+                  {d.reason === "timing" ? "Add due date" : "Add minimum payment"}
+                </Link>
+              </span>
+              <span className="font-medium">
+                {d.reason === "timing" ? fmt(d.minPayment) : "minimum not entered"}
+              </span>
             </li>
           ))}
-          {many && (
+          {many && status.unplacedTotal > 0 && (
             <li className="flex items-baseline justify-between gap-3 border-t border-gold/50 pt-1.5 text-sm text-ink">
-              <span>Not yet placed in this paycheck</span>
+              <span>{status.totalLabel}</span>
               <span className="font-medium">{fmt(status.unplacedTotal)}</span>
             </li>
           )}
@@ -294,7 +296,9 @@ function IncompleteBriefing({
             <p className="mt-1 text-sm text-ink">{status.nextFocus}</p>
           </div>
           <Button asChild>
-            <Link to="/debt">Add due dates →</Link>
+            <Link to="/debt" search={{ edit: status.unplaced[0]?.id }}>
+              {status.ctaLabel}
+            </Link>
           </Button>
         </div>
       </div>
@@ -320,8 +324,9 @@ function IncompleteBriefing({
           </div>
         </div>
         <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-          Required debt minimums ({fmt(status.unplacedTotal)}) are not included yet, so this is{" "}
-          {short ? "not the full gap — it could be larger." : "not the final remainder."}
+          Required debt minimums
+          {status.hasUnknownAmount ? "" : ` (${fmt(status.unplacedTotal)})`} are not included yet,
+          so this is {short ? "not the full gap — it could be larger." : "not the final remainder."}
         </p>
       </div>
     </section>
@@ -401,25 +406,19 @@ function CompleteBriefing({
   );
 }
 
-export function PaycheckBriefing({ state, userId }: { state: MoneyState; userId: string }) {
-  if (state.loading) {
-    return (
-      <section className="paper-card p-6 sm:p-8">
-        <p className="eyebrow">Paycheck briefing</p>
-        <p className="mt-3 text-sm text-muted-foreground">Working it out…</p>
-      </section>
-    );
-  }
-
-  const source = balanceSource(state.profile, state.accounts);
-  const balanceAsOf =
-    source === "accounts"
-      ? oldestAsOf(spendableAccounts(state.accounts).map((a) => a.balance_as_of))
-      : (state.profile?.balance_as_of ?? null);
-  const status = derivePlanStatus(state.snapshot, state.engineInput, {
-    balanceSource: source,
-    balanceAsOf,
-  });
+/** Rendered only inside the data gate (Overview wraps it in MoneyDataGate),
+ *  so every figure here comes from fully loaded engine data. The `view` is
+ *  computed once by the Overview and shared with the Debt-free card. */
+export function PaycheckBriefing({
+  state,
+  userId,
+  view,
+}: {
+  state: MoneyState;
+  userId: string;
+  view: PlanView;
+}) {
+  const { status, ctx } = view;
 
   if (status.kind === "setup") {
     return (
@@ -428,9 +427,13 @@ export function PaycheckBriefing({ state, userId }: { state: MoneyState; userId:
         state={state}
         userId={userId}
         balance={
-          source === "none"
+          ctx.balanceSource === "none"
             ? null
-            : { source, amount: state.engineInput.account.currentBalance, asOf: balanceAsOf }
+            : {
+                source: ctx.balanceSource,
+                amount: state.engineInput.account.currentBalance,
+                asOf: ctx.balanceAsOf,
+              }
         }
       />
     );
