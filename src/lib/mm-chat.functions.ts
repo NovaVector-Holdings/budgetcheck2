@@ -37,7 +37,16 @@ import {
 const Msg = z.object({ role: z.enum(["user", "assistant"]), content: z.string().min(1).max(4000) });
 
 const Input = z.object({
-  messages: z.array(Msg).min(1).max(40),
+  // The client sends at most the last 20 turns (assistant.tsx), so 20 is the real contract;
+  // the total-characters ceiling bounds the cost of a single call (AI-governance finding,
+  // 2026-11-24: 40 x 4,000 chars + a 60K snapshot was roughly 55-60K tokens per call).
+  messages: z
+    .array(Msg)
+    .min(1)
+    .max(20)
+    .refine((m) => m.reduce((n, x) => n + x.content.length, 0) <= 24000, {
+      message: "conversation too long",
+    }),
   /** JSON snapshot produced by computeSnapshot plus the surrounding context.
    *  Every user-entered text field inside it (bill names, account names,
    *  goal names, override reasons, reserved-fund labels) is untrusted data,
@@ -203,11 +212,9 @@ export const askMoneyMeeting = createServerFn({ method: "POST" })
     }
 
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      console.error(
-        `[askMoneyMeeting] external model service returned ${res.status}:`,
-        body.slice(0, 2000),
-      );
+      // Status only: the upstream body can echo the prompt, which carries the person's
+      // balances, debts and account names (AI-governance finding, 2026-11-24).
+      console.error(`[askMoneyMeeting] external model service returned ${res.status}`);
       // classifyTransportError only ever returns one of two fixed strings
       // -- res.status is the only thing passed in, never the body text.
       throw new Error(classifyTransportError(res.status));

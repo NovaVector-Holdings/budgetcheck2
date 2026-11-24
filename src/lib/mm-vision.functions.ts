@@ -9,7 +9,9 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 const Input = z.object({
   /** Data URL of the screenshot, e.g. data:image/png;base64,... */
-  imageDataUrl: z.string().startsWith("data:image/").max(9_000_000),
+  // ~3.7 MB of image once base64-decoded: plenty for a phone screenshot, and it caps
+  // what one call can cost (AI-governance finding, 2026-11-24; was 9 MB).
+  imageDataUrl: z.string().startsWith("data:image/").max(5_000_000),
 });
 
 const SYSTEM = `You read one screenshot of a bank or credit-card screen and return JSON only.
@@ -51,10 +53,13 @@ export const readBalanceScreenshot = createServerFn({ method: "POST" })
     });
 
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      if (res.status === 402) throw new Error("The workspace is out of AI credits. Add credits in Settings, then try again.");
+      // Status only: the upstream body can echo the image or prompt, and credit/workspace
+      // detail is operational, not something to show a user.
+      console.error(`[readBalanceScreenshot] gateway returned ${res.status}`);
       if (res.status === 429) throw new Error("Too many requests just now. Try again in a moment.");
-      throw new Error(`Couldn't read that image (${res.status}): ${body.slice(0, 200)}`);
+      throw new Error(
+        "Couldn't read that image right now. Try again in a moment, or type the numbers in.",
+      );
     }
 
     const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
